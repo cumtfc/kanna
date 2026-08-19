@@ -17,6 +17,7 @@ import { createPairSessionManager, type PairSessionSnapshot } from "./cloud/pair
 import { EventStore } from "./event-store"
 import { AgentCoordinator } from "./agent"
 import { CodexAppServerManager } from "./codex-app-server"
+import { KimiCodeServerProcess } from "./kimi-code-server"
 import { KannaAnalyticsReporter } from "./analytics"
 import { AppSettingsManager } from "./app-settings"
 import { UsageLimitsManager } from "./usage-limits"
@@ -219,6 +220,7 @@ export async function startKannaServer(options: StartKannaServerOptions = {}) {
     })
     : null
   const codexManager = new CodexAppServerManager()
+  const kimiServerProcess = new KimiCodeServerProcess()
   const agent = new AgentCoordinator({
     store,
     analytics,
@@ -608,6 +610,9 @@ export async function startKannaServer(options: StartKannaServerOptions = {}) {
     // A runtime handed in by the CLI is stopped by the CLI; one this process
     // attached at pair time is ours to take down.
     await selfPairedCloud?.stop()
+    // Stop the owned Kimi Code child process (if any) before tearing down the
+    // rest of the server. External sandbox mode is a no-op here.
+    kimiServerProcess.stop()
     clearInterval(staleEmptyChatPruneInterval)
     clearInterval(staleChatAutoArchiveInterval)
     clearInterval(staleChatDeleteInterval)
