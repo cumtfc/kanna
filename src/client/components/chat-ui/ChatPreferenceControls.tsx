@@ -10,6 +10,7 @@ import {
   type CodexModelOptions,
   type CodexReasoningEffort,
   type CursorModelOptions,
+  type KimiModelOptions,
   type PiModelOptions,
   type PiReasoningEffort,
   type ProviderCatalogEntry,
@@ -122,6 +123,7 @@ export type ModelOptionChange =
   | { type: "contextWindow"; contextWindow: ClaudeContextWindow }
   | { type: "codexReasoningEffort"; effort: CodexReasoningEffort }
   | { type: "piReasoningEffort"; effort: PiReasoningEffort }
+  | { type: "kimiReasoningEffort"; effort: string }
   | { type: "fastMode"; fastMode: boolean }
 
 /**
@@ -198,7 +200,7 @@ interface ChatPreferenceControlsProps {
   /** A harness switch is staged for this chat and applies on the next send. */
   providerSwitchPending?: boolean
   model: string
-  modelOptions: ClaudeModelOptions | CodexModelOptions | CursorModelOptions | PiModelOptions
+  modelOptions: ClaudeModelOptions | CodexModelOptions | CursorModelOptions | PiModelOptions | KimiModelOptions
   onProviderChange?: (provider: AgentProvider) => void
   onModelChange: (provider: AgentProvider, model: string) => void
   onModelOptionChange: (change: ModelOptionChange) => void
@@ -267,12 +269,18 @@ export function ChatPreferenceControls({
   const modeControl = includeMode && onModeChange ? controls.mode : null
   const ContextWindowIcon = controls.contextWindow?.selectedId === "1m" ? SquareMenu : SquareMinus
 
-  const reasoningChangeFor = (effortId: string): ModelOptionChange =>
-    selectedProvider === "claude"
-      ? { type: "claudeReasoningEffort", effort: effortId as ClaudeReasoningEffort }
-      : selectedProvider === "pi"
-        ? { type: "piReasoningEffort", effort: effortId as PiReasoningEffort }
-        : { type: "codexReasoningEffort", effort: effortId as CodexReasoningEffort }
+  const reasoningChangeFor = (effortId: string): ModelOptionChange => {
+    if (selectedProvider === "claude") {
+      return { type: "claudeReasoningEffort", effort: effortId as ClaudeReasoningEffort }
+    }
+    if (selectedProvider === "pi") {
+      return { type: "piReasoningEffort", effort: effortId as PiReasoningEffort }
+    }
+    if (selectedProvider === "kimi") {
+      return { type: "kimiReasoningEffort", effort: effortId }
+    }
+    return { type: "codexReasoningEffort", effort: effortId as CodexReasoningEffort }
+  }
 
   return (
     <div className={cn("flex md:justify-center items-center gap-0.5", className)}>

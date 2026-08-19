@@ -110,6 +110,14 @@ export function getEffectiveComposerState(
         planMode: composerState.planMode,
         autoPlan: composerState.autoPlan,
       }
+    case "kimi":
+      return {
+        provider: "kimi",
+        model: providerDefaults.kimi.model,
+        modelOptions: { ...providerDefaults.kimi.modelOptions },
+        planMode: composerState.planMode,
+        autoPlan: composerState.autoPlan,
+      }
     default:
       return assertNever(activeProvider)
   }
@@ -238,7 +246,9 @@ export function deriveComposerOptionControls(
           }))
           : state.provider === "pi"
             ? [...PI_REASONING_OPTIONS]
-            : [...getCodexReasoningOptions(state.model)]
+            : state.provider === "kimi"
+              ? (selectedModelOption?.supportedReasoningEfforts ?? [])
+              : [...getCodexReasoningOptions(state.model)]
       ) as ComposerOptionChoice[],
       selectedId: modelOptions.reasoningEffort,
     }

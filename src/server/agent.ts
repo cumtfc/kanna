@@ -1779,6 +1779,10 @@ export class AgentCoordinator {
         const skills = await this.piManager.listSkills({ chatId: command.chatId, cwd })
         return { provider: "pi", skills, origin: "live" }
       }
+      case "kimi":
+        // Kimi skill enumeration is wired in Task 11; until then the composer
+        // sees no Kimi skills rather than crashing on an unhandled provider.
+        return { provider: "kimi", skills: [], origin: "filesystem" }
     }
   }
 

@@ -75,6 +75,14 @@ function expectedSettingsSnapshot(filePath: string, overrides: Partial<AppSettin
         planMode: false,
         autoPlan: false,
       },
+      kimi: {
+        model: "kimi-code/k3",
+        modelOptions: {
+          reasoningEffort: "max",
+        },
+        planMode: false,
+        autoPlan: false,
+      },
     },
     newSidebarEnabled: true,
     newProjectsDirectory: "~/Kanna",

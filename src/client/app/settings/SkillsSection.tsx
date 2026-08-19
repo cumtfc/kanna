@@ -20,6 +20,7 @@ const PROVIDER_LABELS: Record<AgentProvider, string> = {
   codex: "Codex",
   cursor: "Cursor",
   pi: "Pi",
+  kimi: "Kimi",
 }
 
 function formatInstallCount(count: number) {

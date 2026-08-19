@@ -3,11 +3,13 @@ import {
   SERVER_PROVIDERS,
   applyClaudeSdkModels,
   applyCursorModels,
+  applyKimiModels,
   applyPiFaveModels,
   cursorModelIdForOptions,
   normalizeClaudeModelOptions,
   normalizeCodexModelOptions,
   normalizeCursorModelOptions,
+  normalizeKimiModelOptions,
   normalizeServerModel,
   resetServerProvidersForTests,
   serviceTierFromModelOptions,
@@ -305,5 +307,83 @@ describe("provider catalog normalization", () => {
       { value: "sonnet[1m]", resolvedModel: "claude-sonnet-5[1m]", displayName: "Sonnet (1M context)", supportsEffort: true },
       { value: "nova", resolvedModel: "claude-nova-2", displayName: "Nova" },
     ])).toBe(false)
+  })
+
+  test("applyKimiModels replaces the kimi picker and default model", () => {
+    const changed = applyKimiModels([
+      {
+        provider: "kimi-code",
+        model: "k3",
+        displayName: "K3",
+        maxContextSize: 1_048_576,
+        supportEfforts: ["max"],
+        defaultEffort: "max",
+      },
+    ])
+    expect(changed).toBe(true)
+
+    const kimi = SERVER_PROVIDERS.find((provider) => provider.id === "kimi")
+    expect(kimi?.defaultModel).toBe("k3")
+    expect(kimi?.models.map((model) => [model.id, model.label, model.supportsEffort])).toEqual([
+      ["k3", "K3", true],
+    ])
+    expect(kimi?.models[0]?.supportedReasoningEfforts).toEqual([{ id: "max", label: "Max" }])
+    expect(kimi?.models[0]?.contextWindowTokens).toBe(1_048_576)
+
+    // Re-applying the same list reports no change.
+    expect(applyKimiModels([
+      {
+        provider: "kimi-code",
+        model: "k3",
+        displayName: "K3",
+        maxContextSize: 1_048_576,
+        supportEfforts: ["max"],
+        defaultEffort: "max",
+      },
+    ])).toBe(false)
+  })
+
+  test("applyKimiModels maps per-model effort options and labels", () => {
+    applyKimiModels([
+      {
+        provider: "kimi-code",
+        model: "custom-model",
+        displayName: "Custom Model",
+        maxContextSize: 256_000,
+        supportEfforts: ["low", "medium", "high"],
+        defaultEffort: "medium",
+      },
+    ])
+
+    const kimi = SERVER_PROVIDERS.find((provider) => provider.id === "kimi")
+    const model = kimi?.models.find((candidate) => candidate.id === "custom-model")
+    expect(model?.supportedReasoningEfforts).toEqual([
+      { id: "low", label: "Low" },
+      { id: "medium", label: "Medium" },
+      { id: "high", label: "High" },
+    ])
+    expect(model?.defaultReasoningEffort).toBe("medium")
+  })
+
+  test("applyKimiModels ignores empty lists", () => {
+    expect(applyKimiModels([])).toBe(false)
+  })
+
+  test("normalizes Kimi server model ids through the shared catalog and passes unknown ids through", () => {
+    expect(normalizeServerModel("kimi")).toBe("kimi-code/k3")
+    expect(normalizeServerModel("kimi", "some-vendor/k3")).toBe("some-vendor/k3")
+  })
+
+  test("normalizeKimiModelOptions uses catalog defaults and accepts advertised efforts", () => {
+    expect(normalizeKimiModelOptions("kimi-code/k3")).toEqual({ reasoningEffort: "max" })
+    expect(normalizeKimiModelOptions("kimi-code/k3", { kimi: { reasoningEffort: "max" } })).toEqual({
+      reasoningEffort: "max",
+    })
+  })
+
+  test("normalizeKimiModelOptions falls back when effort is not advertised", () => {
+    expect(normalizeKimiModelOptions("kimi-code/k3", { kimi: { reasoningEffort: "low" } })).toEqual({
+      reasoningEffort: "max",
+    })
   })
 })

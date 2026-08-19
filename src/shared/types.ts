@@ -1,7 +1,7 @@
 export const STORE_VERSION = 2 as const
 export const PROTOCOL_VERSION = 1 as const
 
-export type AgentProvider = "claude" | "codex" | "cursor" | "pi"
+export type AgentProvider = "claude" | "codex" | "cursor" | "pi" | "kimi"
 export type LlmProviderKind = "openai" | "openrouter" | "custom"
 export type AppThemePreference = "light" | "dark" | "system"
 export type ChatSoundPreference = "never" | "unfocused" | "always"
@@ -183,8 +183,8 @@ export interface ProviderModelOption {
   label: string
   supportsEffort: boolean
   aliases?: readonly string[]
-  supportedReasoningEfforts?: readonly CodexReasoningEffortOption[]
-  defaultReasoningEffort?: CodexReasoningEffort
+  supportedReasoningEfforts?: readonly ProviderEffortOption[]
+  defaultReasoningEffort?: string
   supportsFastMode?: boolean
   contextWindowOptions?: readonly ProviderContextWindowOption[]
   /**
@@ -270,11 +270,16 @@ export interface PiModelOptions {
   reasoningEffort: PiReasoningEffort
 }
 
+export interface KimiModelOptions {
+  reasoningEffort: string
+}
+
 export interface ProviderModelOptionsByProvider {
   claude: ClaudeModelOptions
   codex: CodexModelOptions
   cursor: CursorModelOptions
   pi: PiModelOptions
+  kimi: KimiModelOptions
 }
 
 export interface ProviderPreference<TModelOptions> {
@@ -326,6 +331,7 @@ export type ChatProviderPreferences = {
   codex: ProviderPreference<CodexModelOptions>
   cursor: ProviderPreference<CursorModelOptions>
   pi: ProviderPreference<PiModelOptions>
+  kimi: ProviderPreference<KimiModelOptions>
 }
 
 export type ModelOptions = Partial<{
@@ -352,6 +358,12 @@ export const DEFAULT_PI_MODEL = "~anthropic/claude-fable-latest"
 export const DEFAULT_PI_MODEL_OPTIONS = {
   reasoningEffort: "medium",
 } as const satisfies PiModelOptions
+
+export const DEFAULT_KIMI_MODEL = "kimi-code/k3"
+
+export const DEFAULT_KIMI_MODEL_OPTIONS = {
+  reasoningEffort: "max",
+} as const satisfies KimiModelOptions
 
 export function isClaudeReasoningEffort(value: unknown): value is ClaudeReasoningEffort {
   return CLAUDE_REASONING_OPTIONS.some((option) => option.id === value)
@@ -657,6 +669,26 @@ export const PROVIDERS: ProviderCatalogEntry[] = [
     models: piModelOptionsFromFaves(DEFAULT_PI_FAVE_MODELS),
     efforts: [...PI_REASONING_OPTIONS],
   },
+  {
+    // Kimi Code local-server integration. This static catalog is a cold-start
+    // fallback only; the server replaces it from `GET /api/v1/models` once
+    // the Kimi server is reachable (see applyKimiModels in provider-catalog).
+    id: "kimi",
+    label: "Kimi Code",
+    defaultModel: DEFAULT_KIMI_MODEL,
+    defaultEffort: "max",
+    supportsPlanMode: true,
+    supportsAutoPlanMode: false,
+    models: [{
+      id: DEFAULT_KIMI_MODEL,
+      label: "K3",
+      supportsEffort: true,
+      supportedReasoningEfforts: [{ id: "max", label: "Max" }],
+      defaultReasoningEffort: "max",
+      contextWindowTokens: 1_048_576,
+    }],
+    efforts: [{ id: "max", label: "Max" }],
+  },
 ]
 
 export function getProviderCatalog(provider: AgentProvider): ProviderCatalogEntry {
@@ -696,6 +728,13 @@ export function normalizeProviderModelId(
   }
   if (provider === "cursor") {
     return normalizeCursorModelId(modelId, fallbackModelId ?? getProviderCatalog(provider).defaultModel)
+  }
+  if (provider === "kimi") {
+    // The static catalog is a cold-start fallback; the real list comes from
+    // the Kimi server's model discovery. Like pi/cursor, unknown ids pass
+    // through so the server can validate them against the live catalog.
+    const trimmed = typeof modelId === "string" ? modelId.trim() : ""
+    return trimmed || fallbackModelId || getProviderCatalog(provider).defaultModel
   }
   const match = getProviderModelMatch(provider, modelId)
   if (match) return match.id
@@ -748,7 +787,7 @@ export function getCodexModelOption(modelId: string): ProviderModelOption | unde
 }
 
 export function getCodexReasoningOptions(modelId: string): readonly CodexReasoningEffortOption[] {
-  return getCodexModelOption(modelId)?.supportedReasoningEfforts ?? CODEX_REASONING_OPTIONS
+  return (getCodexModelOption(modelId)?.supportedReasoningEfforts ?? CODEX_REASONING_OPTIONS) as readonly CodexReasoningEffortOption[]
 }
 
 export function normalizeCodexReasoningEffort(
@@ -769,7 +808,7 @@ export function normalizeCodexReasoningEffort(
     return effort
   }
 
-  return model?.defaultReasoningEffort ?? DEFAULT_CODEX_MODEL_OPTIONS.reasoningEffort
+  return (model?.defaultReasoningEffort as CodexReasoningEffort | undefined) ?? DEFAULT_CODEX_MODEL_OPTIONS.reasoningEffort
 }
 
 export function supportsClaudeMaxReasoningEffort(modelId: string): boolean {
@@ -1125,6 +1164,9 @@ export interface AppSettingsPatch {
     cursor?: Partial<ProviderPreference<CursorModelOptions>>
     pi?: Partial<Omit<ProviderPreference<PiModelOptions>, "modelOptions">> & {
       modelOptions?: Partial<PiModelOptions>
+    }
+    kimi?: Partial<Omit<ProviderPreference<KimiModelOptions>, "modelOptions">> & {
+      modelOptions?: Partial<KimiModelOptions>
     }
   }
 }

@@ -8,6 +8,7 @@ import {
   type CodexModelOptions,
   type CursorModelOptions,
   type DefaultProviderPreference,
+  type KimiModelOptions,
   type PiModelOptions,
   type ProviderPreference,
   type ProviderModelOptionsByProvider,
@@ -51,7 +52,7 @@ export type ComposerState = {
 export const NEW_CHAT_COMPOSER_ID = "__new__"
 
 export function normalizeDefaultProvider(value?: string): DefaultProviderPreference {
-  if (value === "claude" || value === "codex" || value === "cursor" || value === "pi") return value
+  if (value === "claude" || value === "codex" || value === "cursor" || value === "pi" || value === "kimi") return value
   return "last_used"
 }
 
@@ -226,7 +227,7 @@ interface ChatPreferencesState {
   setChatComposerModel: (chatId: string, model: string) => void
   setChatComposerModelOptions: (
     chatId: string,
-    modelOptions: Partial<ClaudeModelOptions> | Partial<CodexModelOptions> | Partial<CursorModelOptions> | Partial<PiModelOptions>
+    modelOptions: Partial<ClaudeModelOptions> | Partial<CodexModelOptions> | Partial<CursorModelOptions> | Partial<PiModelOptions> | Partial<KimiModelOptions>
   ) => void
   setChatComposerMode: (chatId: string, mode: ChatMode) => void
   /**
