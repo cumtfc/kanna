@@ -187,6 +187,7 @@ interface ChatTranscriptViewportProps {
   transcriptPaddingBottom: number
   localPath: string | null | undefined
   latestToolIds: KannaState["latestToolIds"]
+  liveTurnDraft: KannaState["liveTurnDraft"]
   isProcessing: boolean
   runtimeStatus: string | null
   isDraining: boolean
@@ -308,6 +309,7 @@ const TranscriptScrollerBody = memo(function TranscriptScrollerBody({
   transcriptPaddingBottom,
   localPath,
   latestToolIds,
+  liveTurnDraft,
   isProcessing,
   runtimeStatus,
   isDraining,
@@ -354,7 +356,8 @@ const TranscriptScrollerBody = memo(function TranscriptScrollerBody({
     isLoading: isProcessing,
     localPath: localPath ?? undefined,
     latestToolIds,
-  }), [isProcessing, latestToolIds, localPath, messages])
+    liveTurnDraft,
+  }), [isProcessing, latestToolIds, localPath, liveTurnDraft, messages])
   const resolvedRows = useStableResolvedRows(rawRows)
 
   useEffect(() => {

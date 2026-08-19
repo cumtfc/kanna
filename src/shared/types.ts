@@ -1974,10 +1974,17 @@ export interface ChatRuntime {
   sessionToken: string | null
 }
 
+export interface LiveTurnDraft {
+  assistantText: string
+  reasoningText: string
+}
+
 export interface ChatSnapshot {
   runtime: ChatRuntime
   queuedMessages: QueuedChatMessage[]
   messages: TranscriptEntry[]
+  /** Ephemeral in-memory live text draft; not persisted to the EventStore. */
+  liveTurnDraft?: LiveTurnDraft
   /**
    * Absolute index of `messages[0]` in the transcript. Always 0 on a full
    * snapshot; non-zero on an incremental one, where it says where the slice

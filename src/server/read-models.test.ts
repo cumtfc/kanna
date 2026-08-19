@@ -5,6 +5,7 @@ import path from "node:path"
 import { deriveChatSnapshot, deriveChatTouchedFiles, deriveLocalProjectsSnapshot, deriveSidebarData } from "./read-models"
 import { createEmptyState, type TouchedFile } from "./events"
 import type { WorkingTreeProbe } from "./diff-store"
+import type { LiveTurnDraft } from "../shared/types"
 
 describe("read models", () => {
   test("includes the project folder modification time", () => {
@@ -912,6 +913,61 @@ describe("read models", () => {
 
       const flagged = rows.filter((row) => row.uncommittedWork).map((row) => row.chatId).sort()
       expect(flagged).toEqual(["chat-a", "chat-c"])
+    })
+  })
+
+  describe("deriveChatSnapshot", () => {
+    function stateWithChat() {
+      const state = createEmptyState()
+      state.projectsById.set("project-1", {
+        id: "project-1",
+        localPath: "/tmp/project",
+        title: "Project",
+        createdAt: 1,
+        updatedAt: 1,
+      })
+      state.projectIdsByPath.set("/tmp/project", "project-1")
+      state.chatsById.set("chat-1", {
+        id: "chat-1",
+        projectId: "project-1",
+        title: "Chat",
+        createdAt: 1,
+        updatedAt: 1,
+        unread: false,
+        provider: null,
+        planMode: false,
+        autoPlan: false,
+        sessionToken: null,
+        lastTurnOutcome: null,
+      })
+      return state
+    }
+
+    test("includes liveTurnDraft from the getter", () => {
+      const state = stateWithChat()
+      const draft: LiveTurnDraft = { assistantText: "Typing…", reasoningText: "Thinking…" }
+      const snapshot = deriveChatSnapshot(
+        state,
+        new Map(),
+        new Set(),
+        "chat-1",
+        () => ({ messages: [], startIndex: 0, readAnchor: null }),
+        () => draft,
+      )
+      expect(snapshot?.liveTurnDraft).toBe(draft)
+    })
+
+    test("excludes liveTurnDraft when the getter returns null", () => {
+      const state = stateWithChat()
+      const snapshot = deriveChatSnapshot(
+        state,
+        new Map(),
+        new Set(),
+        "chat-1",
+        () => ({ messages: [], startIndex: 0, readAnchor: null }),
+        () => null,
+      )
+      expect("liveTurnDraft" in (snapshot ?? {})).toBe(false)
     })
   })
 })

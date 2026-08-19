@@ -13,11 +13,14 @@ import {
 
 const ROW_WRAPPER_CLASS = "mx-auto max-w-[800px] pb-5"
 
+import type { LiveTurnDraft } from "../../shared/types"
+
 // Minimal test harness mirroring how ChatTranscriptViewport renders resolved rows.
-function TestTranscript({ messages }: { messages: HydratedTranscriptMessage[] }) {
+function TestTranscript({ messages, liveTurnDraft }: { messages: HydratedTranscriptMessage[]; liveTurnDraft?: LiveTurnDraft }) {
   const rows = buildResolvedTranscriptRows(messages, {
     isLoading: false,
     latestToolIds: { AskUserQuestion: null, ExitPlanMode: null, TodoWrite: null },
+    liveTurnDraft,
   })
 
   return (
@@ -40,8 +43,8 @@ function TestTranscript({ messages }: { messages: HydratedTranscriptMessage[] })
   )
 }
 
-function renderTranscript(messages: HydratedTranscriptMessage[]) {
-  return renderToStaticMarkup(<TestTranscript messages={messages} />)
+function renderTranscript(messages: HydratedTranscriptMessage[], liveTurnDraft?: LiveTurnDraft) {
+  return renderToStaticMarkup(<TestTranscript messages={messages} liveTurnDraft={liveTurnDraft} />)
 }
 
 function countRowWrappers(html: string) {
@@ -831,5 +834,31 @@ Please check the latest error first.`,
     const stableState = computeStableResolvedTranscriptRows(nextRows, previousState)
 
     expect(stableState.result[0]).toBe(previousRows[0])
+  })
+
+  describe("liveTurnDraft", () => {
+    test("renders an assistant text draft as a transcript row", () => {
+      const html = renderTranscript([], { assistantText: "Hello world", reasoningText: "" })
+      expect(countRowWrappers(html)).toBe(1)
+      expect(html).toContain("Hello world")
+    })
+
+    test("renders a reasoning text draft as a status row", () => {
+      const html = renderTranscript([], { assistantText: "", reasoningText: "Reasoning aloud" })
+      expect(countRowWrappers(html)).toBe(1)
+      expect(html).toContain("Reasoning aloud")
+    })
+
+    test("renders both drafts when present", () => {
+      const html = renderTranscript([], { assistantText: "Output", reasoningText: "Reasoning" })
+      expect(countRowWrappers(html)).toBe(2)
+      expect(html).toContain("Output")
+      expect(html).toContain("Reasoning")
+    })
+
+    test("does not render draft rows when liveTurnDraft is undefined", () => {
+      const html = renderTranscript([], undefined)
+      expect(countRowWrappers(html)).toBe(0)
+    })
   })
 })

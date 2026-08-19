@@ -455,7 +455,8 @@ export function createWsRouter({
           agent.getActiveStatuses(),
           agent.getDrainingChatIds(),
           topic.chatId,
-          (chatId) => store.getClientTranscript(chatId)
+          (chatId) => store.getClientTranscript(chatId),
+          (chatId) => agent.getLiveTurnDraft?.(chatId) ?? null
         ),
       },
     }
@@ -472,7 +473,8 @@ export function createWsRouter({
       agent.getActiveStatuses(),
       agent.getDrainingChatIds(),
       chatId,
-      (id) => store.getClientTranscript(id)
+      (id) => store.getClientTranscript(id),
+      (id) => agent.getLiveTurnDraft?.(id) ?? null
     )
     if (cache) {
       (cache.chat ??= new Map()).set(key, data)
