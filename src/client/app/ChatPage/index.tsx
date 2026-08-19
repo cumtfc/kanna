@@ -1013,6 +1013,7 @@ export function ChatPage() {
           transcriptPaddingBottom={transcriptPaddingBottom}
           localPath={state.runtime?.localPath}
           latestToolIds={state.latestToolIds}
+          liveTurnDraft={state.liveTurnDraft}
           isProcessing={state.isProcessing}
           runtimeStatus={state.runtimeStatus}
           isDraining={state.isDraining}

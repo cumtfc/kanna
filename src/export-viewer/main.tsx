@@ -158,6 +158,7 @@ function StandaloneTranscriptApp() {
             transcriptPaddingBottom={120}
             localPath={state.bundle.localPath}
             latestToolIds={latestToolIds}
+            liveTurnDraft={undefined}
             isProcessing={false}
             runtimeStatus={null}
             isDraining={false}

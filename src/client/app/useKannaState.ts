@@ -182,6 +182,7 @@ export interface KannaState {
   latestToolIds: ReturnType<typeof getLatestToolIds>
   runtime: ChatSnapshot["runtime"] | null
   runtimeStatus: string | null
+  liveTurnDraft: ChatSnapshot["liveTurnDraft"]
   availableProviders: ProviderCatalogEntry[]
   isProcessing: boolean
   canCancel: boolean
@@ -514,6 +515,7 @@ export function useKannaState(activeChatId: string | null): KannaState {
     return unsubscribe
   }, [activeProjectId, socket])
   const serverTranscriptEntries = activeChatSnapshot?.messages ?? EMPTY_TRANSCRIPT_ENTRIES
+  const liveTurnDraft = activeChatSnapshot?.liveTurnDraft
   const optimisticScopeId = activeChatId ?? NEW_CHAT_OPTIMISTIC_SCOPE
   const optimisticTranscriptEntries = useMemo(
     () => optimisticUserPrompts
@@ -923,6 +925,7 @@ export function useKannaState(activeChatId: string | null): KannaState {
     latestToolIds,
     runtime,
     runtimeStatus: effectiveRuntimeStatus,
+    liveTurnDraft,
     availableProviders,
     isProcessing,
     canCancel,

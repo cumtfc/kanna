@@ -1,6 +1,6 @@
 import React, { memo, useMemo, useRef } from "react"
 import type { AskUserQuestionItem, ProcessedToolCall } from "../components/messages/types"
-import type { AskUserQuestionAnswerMap, ChatAttachment, HydratedTranscriptMessage } from "../../shared/types"
+import type { AskUserQuestionAnswerMap, ChatAttachment, HydratedTranscriptMessage, LiveTurnDraft } from "../../shared/types"
 import { UserMessage } from "../components/messages/UserMessage"
 import { RawJsonMessage } from "../components/messages/RawJsonMessage"
 import { SystemMessage, type SessionHandoff, type SessionRestore } from "../components/messages/SystemMessage"
@@ -663,10 +663,12 @@ export function buildResolvedTranscriptRows(
     isLoading,
     localPath,
     latestToolIds,
+    liveTurnDraft,
   }: {
     isLoading: boolean
     localPath?: string
     latestToolIds: Record<string, string | null>
+    liveTurnDraft?: LiveTurnDraft
     /** True when the loaded window may not include the start of the transcript. */
   }
 ): ResolvedTranscriptRow[] {
@@ -712,6 +714,58 @@ export function buildResolvedTranscriptRows(
     if (renderState.shouldRender) {
       rows.push(row)
     }
+  }
+
+  // Render ephemeral live provider text drafts as the last active blocks. These
+  // are in-memory only and are cleared as soon as the final transcript entry
+  // arrives, so they never accumulate or persist.
+  const now = new Date().toISOString()
+  if (liveTurnDraft?.assistantText) {
+    rows.push({
+      kind: "single",
+      id: "live-draft-assistant",
+      message: {
+        id: "live-draft-assistant",
+        kind: "assistant_text",
+        text: liveTurnDraft.assistantText,
+        timestamp: now,
+      },
+      index: messages.length,
+      isLoading: isLoading,
+      localPath,
+      isFirstSystem: false,
+      isModelChange: false,
+      isFirstAccount: false,
+      isLatestAskUserQuestion: false,
+      isLatestExitPlanMode: false,
+      isLatestTodoWrite: false,
+      hideResult: false,
+      isFinalStatus: true,
+    })
+  }
+
+  if (liveTurnDraft?.reasoningText) {
+    rows.push({
+      kind: "single",
+      id: "live-draft-reasoning",
+      message: {
+        id: "live-draft-reasoning",
+        kind: "status",
+        status: liveTurnDraft.reasoningText,
+        timestamp: now,
+      },
+      index: messages.length + 1,
+      isLoading: isLoading,
+      localPath,
+      isFirstSystem: false,
+      isModelChange: false,
+      isFirstAccount: false,
+      isLatestAskUserQuestion: false,
+      isLatestExitPlanMode: false,
+      isLatestTodoWrite: false,
+      hideResult: false,
+      isFinalStatus: true,
+    })
   }
 
   return rows

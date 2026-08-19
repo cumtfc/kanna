@@ -7,6 +7,7 @@ import type {
   CodexReasoningEffort,
   ContextWindowUsageSnapshot,
   HarnessSkill,
+  LiveTurnDraft,
   ModelOptions,
   NormalizedToolCall,
   PendingToolSnapshot,
@@ -844,6 +845,7 @@ export class AgentCoordinator {
   readonly activeTurns = new Map<string, ActiveTurn>()
   readonly drainingStreams = new Map<string, { turn: HarnessTurn }>()
   readonly claudeSessions = new Map<string, ClaudeSessionState>()
+  private readonly liveTurnDrafts = new Map<string, LiveTurnDraft>()
 
   constructor(args: AgentCoordinatorArgs) {
     this.store = args.store
@@ -920,6 +922,10 @@ export class AgentCoordinator {
     const pending = this.activeTurns.get(chatId)?.pendingTool
     if (!pending) return null
     return { toolUseId: pending.toolUseId, toolKind: pending.tool.toolKind }
+  }
+
+  getLiveTurnDraft(chatId: string): LiveTurnDraft | null {
+    return this.liveTurnDrafts.get(chatId) ?? null
   }
 
   getDrainingChatIds(): Set<string> {
@@ -1128,6 +1134,7 @@ export class AgentCoordinator {
     // token actually takes effect. Cursor spawns per turn — nothing to close.
     this.codexManager.stopSession(chatId)
     this.piManager.closeChat(chatId)
+    this.liveTurnDrafts.delete(chatId)
     await this.store.setSessionToken(chatId, null)
     await this.store.setPendingForkSessionToken(chatId, null)
 
@@ -2054,6 +2061,18 @@ export class AgentCoordinator {
           continue
         }
 
+        if (event.type === "live_text_delta" && event.delta) {
+          const draft = this.liveTurnDrafts.get(active.chatId) ?? { assistantText: "", reasoningText: "" }
+          if (event.delta.channel === "assistant") {
+            draft.assistantText = event.delta.text
+          } else {
+            draft.reasoningText = event.delta.text
+          }
+          this.liveTurnDrafts.set(active.chatId, draft)
+          this.emitStateChange(active.chatId)
+          continue
+        }
+
         if (!event.entry) continue
         await this.store.appendMessage(active.chatId, event.entry)
 
@@ -2061,8 +2080,17 @@ export class AgentCoordinator {
           active.status = "running"
         }
 
+        if (event.entry.kind === "assistant_text") {
+          const draft = this.liveTurnDrafts.get(active.chatId)
+          if (draft) {
+            draft.assistantText = ""
+            this.liveTurnDrafts.set(active.chatId, draft)
+          }
+        }
+
         if (event.entry.kind === "result") {
           active.hasFinalResult = true
+          this.liveTurnDrafts.delete(active.chatId)
           if (event.entry.isError) {
             await this.store.recordTurnFailed(active.chatId, event.entry.result || "Turn failed")
           } else if (!active.cancelRequested) {
@@ -2094,6 +2122,7 @@ export class AgentCoordinator {
           })
         )
         await this.store.recordTurnFailed(active.chatId, message)
+        this.liveTurnDrafts.delete(active.chatId)
       }
     } finally {
       if (active.cancelRequested && !active.cancelRecorded) {
@@ -2222,6 +2251,7 @@ export class AgentCoordinator {
     // Remove from activeTurns immediately so the UI reflects the cancellation
     // right away, rather than waiting for interrupt() which may hang.
     this.activeTurns.delete(chatId)
+    this.liveTurnDrafts.delete(chatId)
     this.emitStateChange(chatId)
     logClaudeSteer("cancel_active_turn_deleted", {
       chatId,
