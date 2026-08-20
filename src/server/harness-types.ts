@@ -23,4 +23,11 @@ export interface HarnessTurn {
   getAccountInfo?: () => Promise<AccountInfo | null>
   interrupt: () => Promise<void>
   close: () => void
+  steer?: (input: {
+    content: string
+    attachments: import("../shared/types").ChatAttachment[]
+    model?: string
+    effort?: string
+    planMode?: boolean
+  }) => Promise<"steered" | "started_new_turn">
 }
