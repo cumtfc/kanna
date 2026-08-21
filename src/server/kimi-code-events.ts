@@ -138,7 +138,9 @@ export class KimiEventConnection {
       }
 
       if (message.type === "resync_required") {
-        this.broadcastResyncRequired()
+        // Defer snapshot recovery out of the WebSocket message callback so that
+        // the HTTP client is not invoked synchronously inside the socket handler.
+        queueMicrotask(() => this.broadcastResyncRequired())
         return
       }
 
