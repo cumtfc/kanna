@@ -36,6 +36,7 @@ function TestTranscript({ messages, liveTurnDraft }: { messages: HydratedTranscr
             onToolGroupExpandedChange={() => undefined}
             onAskUserQuestionSubmit={() => undefined}
             onExitPlanModeConfirm={() => undefined}
+            onApprovalResponse={() => undefined}
           />
         </div>
       ))}

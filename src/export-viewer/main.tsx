@@ -9,7 +9,7 @@ import { processTranscriptMessages } from "../client/lib/parseTranscript"
 import { syncThemeMetadata } from "../client/hooks/useTheme"
 import type { AskUserQuestionItem } from "../client/components/messages/types"
 import { APP_NAME } from "../shared/branding"
-import type { AskUserQuestionAnswerMap, StandaloneTranscriptBundle } from "../shared/types"
+import type { AgentApprovalResponse, AskUserQuestionAnswerMap, StandaloneTranscriptBundle } from "../shared/types"
 import "../index.css"
 
 type ViewerState =
@@ -91,6 +91,10 @@ function StandaloneTranscriptApp() {
     _clearContext?: boolean,
     _message?: string,
   ) => Promise.resolve(), [])
+  const handleApprovalResponse = useCallback((
+    _toolUseId: string,
+    _response: AgentApprovalResponse,
+  ) => Promise.resolve(), [])
   const handleOpenLocalLink = useCallback(() => Promise.resolve(), [])
   const scrollToBottom = useCallback(() => {
     listRef.current?.scrollToEnd()
@@ -169,6 +173,7 @@ function StandaloneTranscriptApp() {
             onOpenLocalLink={handleOpenLocalLink}
             onAskUserQuestionSubmit={handleAskUserQuestion}
             onExitPlanModeConfirm={handleExitPlanMode}
+            onApprovalResponse={handleApprovalResponse}
             showScrollButton={!isAtEnd && messages.length > 0}
             onIsAtEndChange={setIsAtEnd}
             scrollToBottom={scrollToBottom}

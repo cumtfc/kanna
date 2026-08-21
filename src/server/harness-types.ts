@@ -1,4 +1,14 @@
-import type { AccountInfo, AgentProvider, NormalizedToolCall, TranscriptEntry } from "../shared/types"
+import type {
+  AccountInfo,
+  AgentApprovalRequest,
+  AgentApprovalResponse,
+  AgentProvider,
+  NormalizedToolCall,
+  TranscriptEntry,
+} from "../shared/types"
+
+export type HarnessApprovalRequest = AgentApprovalRequest
+export type HarnessApprovalResponse = AgentApprovalResponse
 
 export interface HarnessLiveTextDelta {
   channel: "assistant" | "reasoning"

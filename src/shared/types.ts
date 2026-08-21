@@ -1252,15 +1252,16 @@ export interface UsageLimitsSnapshot {
 // the coding-agent CLIs (claude, codex, cursor-agent), gh, and OpenRouter.
 // ---------------------------------------------------------------------------
 
-export type AuthServiceId = "claude" | "codex" | "cursor" | "gh" | "openrouter"
+export type AuthServiceId = "claude" | "codex" | "cursor" | "gh" | "kimi" | "openrouter"
 
-export const AUTH_SERVICE_ORDER: AuthServiceId[] = ["claude", "codex", "cursor", "gh", "openrouter"]
+export const AUTH_SERVICE_ORDER: AuthServiceId[] = ["claude", "codex", "cursor", "gh", "kimi", "openrouter"]
 
 export const AUTH_SERVICE_LABELS: Record<AuthServiceId, string> = {
   claude: "Claude Code",
   codex: "Codex",
   cursor: "Cursor",
   gh: "GitHub",
+  kimi: "Kimi Code",
   openrouter: "OpenRouter",
 }
 
@@ -1323,7 +1324,7 @@ export interface ProviderAuthSnapshot {
  * OpenAI-compatible endpoint — don't conflate it with the OpenRouter card).
  */
 export function authServiceForProvider(provider: AgentProvider): AuthServiceId | null {
-  if (provider === "claude" || provider === "codex" || provider === "cursor") return provider
+  if (provider === "claude" || provider === "codex" || provider === "cursor" || provider === "kimi") return provider
   return null
 }
 
@@ -1455,6 +1456,33 @@ export interface AskUserQuestionItem {
 
 export type AskUserQuestionAnswerMap = Record<string, string[]>
 
+export interface AgentApprovalOption {
+  id: "approve" | "approve_session" | "reject" | "cancel"
+  label: string
+}
+
+export interface AgentApprovalPlanExit {
+  plan?: string
+  options?: Array<{ label: string; description?: string }>
+}
+
+export interface AgentApprovalRequest {
+  id: string
+  toolId: string
+  toolName: string
+  action: string
+  input: unknown
+  options: AgentApprovalOption[]
+  planExit?: AgentApprovalPlanExit
+}
+
+export interface AgentApprovalResponse {
+  decision: "approved" | "rejected" | "cancelled"
+  scope?: "session"
+  feedback?: string
+  selectedLabel?: string
+}
+
 export interface TodoItem {
   content: string
   status: "pending" | "in_progress" | "completed"
@@ -1493,6 +1521,9 @@ export interface AskUserQuestionToolCall
 
 export interface ExitPlanModeToolCall
   extends ToolCallBase<"exit_plan_mode", { plan?: string; summary?: string }> { }
+
+export interface ApprovalToolCall
+  extends ToolCallBase<"approval", AgentApprovalRequest> { }
 
 export interface TodoWriteToolCall
   extends ToolCallBase<"todo_write", { todos: TodoItem[] }> { }
@@ -1536,6 +1567,7 @@ export interface UnknownToolCall
 export type NormalizedToolCall =
   | AskUserQuestionToolCall
   | ExitPlanModeToolCall
+  | ApprovalToolCall
   | TodoWriteToolCall
   | SkillToolCall
   | GlobToolCall
@@ -1938,6 +1970,7 @@ export interface ExitPlanModeToolResult {
 interface HydratedToolResultOverrides {
   ask_user_question: AskUserQuestionToolResult
   exit_plan_mode: ExitPlanModeToolResult
+  approval: AgentApprovalResponse
   read_file: ReadFileToolResult | string
 }
 
@@ -2076,5 +2109,5 @@ export interface ResolvedChatReadAnchor {
 
 export interface PendingToolSnapshot {
   toolUseId: string
-  toolKind: "ask_user_question" | "exit_plan_mode"
+  toolKind: "ask_user_question" | "exit_plan_mode" | "approval"
 }

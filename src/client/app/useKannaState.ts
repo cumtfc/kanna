@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { useShallow } from "zustand/react/shallow"
-import { PROVIDERS, withPiFaveModels, type AgentProvider, type AppSettingsPatch, type AskUserQuestionAnswerMap, type AppSettingsSnapshot, type ChatDiffSnapshot, type FaveModel, type KeybindingsSnapshot, type LlmProviderSnapshot, type LlmProviderValidationResult, type ModelOptions, type ProviderCatalogEntry, type QueuedChatMessage, type StandaloneTranscriptExportCommandResult, type TranscriptEntry, type UpdateSnapshot } from "../../shared/types"
+import { PROVIDERS, withPiFaveModels, type AgentApprovalResponse, type AgentProvider, type AppSettingsPatch, type AskUserQuestionAnswerMap, type AppSettingsSnapshot, type ChatDiffSnapshot, type FaveModel, type KeybindingsSnapshot, type LlmProviderSnapshot, type LlmProviderValidationResult, type ModelOptions, type ProviderCatalogEntry, type QueuedChatMessage, type StandaloneTranscriptExportCommandResult, type TranscriptEntry, type UpdateSnapshot } from "../../shared/types"
 import { NEW_CHAT_COMPOSER_ID, useChatPreferencesStore } from "../stores/chatPreferencesStore"
 import { useRightSidebarStore } from "../stores/rightSidebarStore"
 import { useTerminalLayoutStore } from "../stores/terminalLayoutStore"
@@ -249,6 +249,7 @@ export interface KannaState {
     clearContext?: boolean,
     message?: string
   ) => Promise<void>
+  handleApprovalResponse: (toolUseId: string, response: AgentApprovalResponse) => Promise<void>
   handleExportStandalone: (chatId?: string | null) => Promise<StandaloneTranscriptExportCommandResult | null>
   handleCloseStandaloneShareDialog: () => void
   handleOpenStandaloneShareLink: () => void
@@ -857,6 +858,7 @@ export function useKannaState(activeChatId: string | null): KannaState {
     handleRenameProject,
     handleAskUserQuestion,
     handleExitPlanMode,
+    handleApprovalResponse,
     handleCopyPath,
     handleOpenExternal,
     handleOpenLocalLink,
@@ -978,6 +980,7 @@ export function useKannaState(activeChatId: string | null): KannaState {
     handleCompose,
     handleAskUserQuestion,
     handleExitPlanMode,
+    handleApprovalResponse,
     handleExportStandalone,
     handleCloseStandaloneShareDialog,
     handleOpenStandaloneShareLink,

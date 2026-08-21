@@ -69,6 +69,7 @@
     "src/client/components/messages/StatusMessage.tsx",
     "src/client/components/messages/AskUserQuestionMessage.tsx",
     "src/client/components/messages/ExitPlanModeMessage.tsx",
+    "src/client/components/messages/ApprovalMessage.tsx",
     "src/client/components/messages/CollapsedToolGroup.tsx",
     "src/client/components/messages/TodoWriteMessage.tsx",
     "src/client/components/messages/EnvChangedMessage.tsx",
