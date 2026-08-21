@@ -344,6 +344,29 @@ export function ProvidersSection({
           </div>
         </SettingsRow>
 
+        <SettingsRow def={SETTINGS_ROWS.kimiDefaults} alignStart>
+          <div className="">
+            <ChatPreferenceControls
+              availableProviders={state.availableProviders}
+              selectedProvider="kimi"
+              showProviderPicker={false}
+              providerLocked
+              model={providerDefaults.kimi.model}
+              modelOptions={providerDefaults.kimi.modelOptions}
+              onModelChange={(_, model) => {
+                handleProviderDefaultModelChange("kimi", model)
+              }}
+              onModelOptionChange={(change) => {
+                if (change.type === "kimiReasoningEffort") {
+                  handleProviderDefaultModelOptionsChange("kimi", { reasoningEffort: change.effort })
+                }
+              }}
+              mode={chatModeFromFlags(providerDefaults.kimi.planMode, providerDefaults.kimi.autoPlan)}
+              className="justify-start flex-wrap"
+            />
+          </div>
+        </SettingsRow>
+
         <SettingsRow def={SETTINGS_ROWS.modelRegistry} description={llmValidationDescription} alignStart>
           <div className="flex w-full  flex-col gap-3">
             {llmProviderError ? (

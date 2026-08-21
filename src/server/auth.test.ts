@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import path from "node:path"
 import { persistProjectUpload } from "./uploads"
 import { startKannaServer } from "./server"
+import { createAuthManager } from "./auth"
 
 const tempDirs: string[] = []
 
@@ -141,6 +142,51 @@ describe("password auth", () => {
     } finally {
       await server.stop()
     }
+  })
+
+  test("allows whitelisted origins and ignores scheme differences", async () => {
+    const auth = createAuthManager("secret", {
+      allowedOrigins: ["https://example.com:8443"],
+    })
+
+    const allowedHttp = await auth.handleLogin(
+      new Request("http://localhost:3210/auth/login", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Origin: "http://example.com:8443",
+        },
+        body: JSON.stringify({ password: "secret" }),
+      }),
+      "/",
+    )
+    expect(allowedHttp.status).toBe(200)
+
+    const allowedHttps = await auth.handleLogin(
+      new Request("http://localhost:3210/auth/login", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Origin: "https://example.com:8443",
+        },
+        body: JSON.stringify({ password: "secret" }),
+      }),
+      "/",
+    )
+    expect(allowedHttps.status).toBe(200)
+
+    const rejected = await auth.handleLogin(
+      new Request("http://localhost:3210/auth/login", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Origin: "https://other.test",
+        },
+        body: JSON.stringify({ password: "secret" }),
+      }),
+      "/",
+    )
+    expect(rejected.status).toBe(403)
   })
 
   test("allows authenticated access to protected routes", async () => {
@@ -324,6 +370,51 @@ describe("password auth", () => {
         },
       })
       expect(healthResponse.status).toBe(200)
+    } finally {
+      await server.stop()
+    }
+  })
+
+  test("emits CORS headers for whitelisted origins", async () => {
+    const projectDir = await mkdtemp(path.join(tmpdir(), "kanna-cors-test-"))
+    const dataDir = await mkdtemp(path.join(tmpdir(), "kanna-cors-data-"))
+    tempDirs.push(projectDir)
+    tempDirs.push(dataDir)
+    const server = await startKannaServer({
+      dataDir,
+      port: 54324,
+      strictPort: true,
+      password: "secret",
+      allowedOrigins: ["https://example.com:8443"],
+    })
+
+    try {
+      const preflight = await fetch(`http://localhost:${server.port}/health`, {
+        method: "OPTIONS",
+        headers: {
+          Origin: "http://example.com:8443",
+          "Access-Control-Request-Method": "GET",
+        },
+      })
+      expect(preflight.status).toBe(204)
+      expect(preflight.headers.get("Access-Control-Allow-Origin")).toBe("http://example.com:8443")
+      expect(preflight.headers.get("Access-Control-Allow-Methods")).toContain("GET")
+
+      const health = await fetch(`http://localhost:${server.port}/health`, {
+        headers: {
+          Origin: "https://example.com:8443",
+        },
+      })
+      expect(health.status).toBe(200)
+      expect(health.headers.get("Access-Control-Allow-Origin")).toBe("https://example.com:8443")
+
+      const rejected = await fetch(`http://localhost:${server.port}/health`, {
+        headers: {
+          Origin: "http://evil.test",
+        },
+      })
+      expect(rejected.status).toBe(200)
+      expect(rejected.headers.get("Access-Control-Allow-Origin")).toBeNull()
     } finally {
       await server.stop()
     }

@@ -2370,6 +2370,136 @@ describe("session restore on lost native session", () => {
   })
 })
 
+describe("AgentCoordinator live text drafts", () => {
+  test("accumulates assistant and reasoning drafts from live_text_delta events", async () => {
+    const fakeCodexManager = {
+      async startSession() {},
+      async startTurn(): Promise<HarnessTurn> {
+        async function* stream() {
+          yield {
+            type: "live_text_delta" as const,
+            delta: { channel: "assistant" as const, text: "hello ", offset: 0 },
+          }
+          yield {
+            type: "live_text_delta" as const,
+            delta: { channel: "reasoning" as const, text: "thinking...", offset: 0 },
+          }
+          // Give the test a stable window to observe both draft fields before
+          // the transcript entries clear/overwrite them.
+          await new Promise((resolve) => setTimeout(resolve, 50))
+          yield {
+            type: "transcript" as const,
+            entry: timestamped({ kind: "system_init", provider: "codex", model: "gpt-5.4", tools: [], agents: [], slashCommands: [], mcpServers: [] }),
+          }
+          yield {
+            type: "transcript" as const,
+            entry: timestamped({ kind: "assistant_text", text: "hello world" }),
+          }
+          yield {
+            type: "transcript" as const,
+            entry: timestamped({ kind: "result", subtype: "success", isError: false, durationMs: 0, result: "" }),
+          }
+        }
+        return { provider: "codex", stream: stream(), interrupt: async () => {}, close: () => {} }
+      },
+    }
+
+    const store = createFakeStore()
+    const coordinator = new AgentCoordinator({
+      store: store as never,
+      onStateChange: () => {},
+      codexManager: fakeCodexManager as never,
+    })
+
+    await coordinator.send({ type: "chat.send", chatId: "chat-1", provider: "codex", content: "hi", model: "gpt-5.4" })
+
+    await waitFor(
+      () => coordinator.getLiveTurnDraft("chat-1")?.assistantText === "hello "
+        && coordinator.getLiveTurnDraft("chat-1")?.reasoningText === "thinking..."
+    )
+
+    await waitFor(() => store.turnFinishedCount === 1)
+    expect(coordinator.getLiveTurnDraft("chat-1")).toBeNull()
+    expect(store.messages.some((entry) => entry.kind === "assistant_text" && entry.text === "hello world")).toBe(true)
+    expect(store.messages.some((entry) => "delta" in entry)).toBe(false)
+  })
+
+  test("clears live drafts on cancellation", async () => {
+    const fakeCodexManager = {
+      async startSession() {},
+      async startTurn(): Promise<HarnessTurn> {
+        async function* stream() {
+          yield {
+            type: "live_text_delta" as const,
+            delta: { channel: "assistant" as const, text: "partial", offset: 0 },
+          }
+          // Never finish; the test cancels the turn.
+          await new Promise(() => {})
+        }
+        return { provider: "codex", stream: stream(), interrupt: async () => {}, close: () => {} }
+      },
+    }
+
+    const store = createFakeStore()
+    const coordinator = new AgentCoordinator({
+      store: store as never,
+      onStateChange: () => {},
+      codexManager: fakeCodexManager as never,
+    })
+
+    await coordinator.send({ type: "chat.send", chatId: "chat-1", provider: "codex", content: "hi", model: "gpt-5.4" })
+    await waitFor(() => coordinator.getLiveTurnDraft("chat-1")?.assistantText === "partial")
+
+    await coordinator.cancel("chat-1")
+    expect(coordinator.getLiveTurnDraft("chat-1")).toBeNull()
+  })
+
+  test("clears live drafts on provider switch", async () => {
+    const fakeCodexManager = {
+      async startSession() {},
+      stopSession() {},
+      async startTurn(): Promise<HarnessTurn> {
+        async function* stream() {
+          yield {
+            type: "transcript" as const,
+            entry: timestamped({ kind: "result", subtype: "success", isError: false, durationMs: 0, result: "" }),
+          }
+        }
+        return { provider: "codex", stream: stream(), interrupt: async () => {}, close: () => {} }
+      },
+    }
+
+    const fakeCursorManager = {
+      async startTurn(): Promise<HarnessTurn> {
+        async function* stream() {
+          yield {
+            type: "transcript" as const,
+            entry: timestamped({ kind: "result", subtype: "success", isError: false, durationMs: 0, result: "" }),
+          }
+        }
+        return { provider: "cursor", stream: stream(), interrupt: async () => {}, close: () => {} }
+      },
+    }
+
+    const store = createFakeStore()
+    store.chat.provider = "codex"
+    const coordinator = new AgentCoordinator({
+      store: store as never,
+      onStateChange: () => {},
+      codexManager: fakeCodexManager as never,
+      cursorManager: fakeCursorManager as never,
+    })
+
+    // Seed an in-memory live draft so the switch can be observed clearing it.
+    ;(coordinator as any).liveTurnDrafts.set("chat-1", { assistantText: "codex draft", reasoningText: "codex reasoning" })
+
+    await coordinator.send({ type: "chat.send", chatId: "chat-1", provider: "cursor", content: "switch", model: "composer-2.5" })
+
+    expect(coordinator.getLiveTurnDraft("chat-1")).toBeNull()
+    expect(store.messages.some((entry) => entry.kind === "handoff_boundary")).toBe(true)
+  })
+})
+
 function createFakeChat(id: string, projectId: string, title = "New Chat") {
   return {
     id,

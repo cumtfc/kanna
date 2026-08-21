@@ -5,9 +5,11 @@ import type {
   CursorModelOptions,
   ClaudeContextWindow,
   FaveModel,
+  KimiModelOptions,
   ModelOptions,
   PiModelOptions,
   ProviderCatalogEntry,
+  ProviderEffortOption,
   ProviderModelOption,
   ServiceTier,
 } from "../shared/types"
@@ -15,6 +17,7 @@ import {
   CLAUDE_CONTEXT_WINDOW_OPTIONS,
   DEFAULT_CLAUDE_MODEL_OPTIONS,
   DEFAULT_CURSOR_MODEL_OPTIONS,
+  DEFAULT_KIMI_MODEL_OPTIONS,
   PROVIDERS,
   deriveModelLabel,
   withPiFaveModels,
@@ -247,11 +250,12 @@ export function getServerProviderCatalog(provider: AgentProvider): ProviderCatal
 export function normalizeServerModel(provider: AgentProvider, model?: string): string {
   const catalog = getServerProviderCatalog(provider)
   const normalizedModel = normalizeProviderModelId(provider, model, catalog.defaultModel)
-  // Pi accepts arbitrary OpenRouter model ids; Cursor's and Claude's valid ids
-  // are whatever the harness reports at runtime (applyCursorModels /
-  // applyClaudeSdkModels) — for all three, the catalog is only a picker, so
-  // unknown ids pass through for the provider to validate.
-  if (provider === "pi" || provider === "cursor" || provider === "claude") {
+  // Pi accepts arbitrary OpenRouter model ids; Cursor's, Claude's, and Kimi's
+  // valid ids are whatever the harness / local server reports at runtime
+  // (applyCursorModels / applyClaudeSdkModels / applyKimiModels) — for all of
+  // them, the catalog is only a picker, so unknown ids pass through for the
+  // provider to validate.
+  if (provider === "pi" || provider === "cursor" || provider === "claude" || provider === "kimi") {
     return normalizedModel
   }
   if (catalog.models.some((candidate) => candidate.id === normalizedModel)) {
@@ -329,4 +333,93 @@ export function cursorModelIdForOptions(baseModel: string, modelOptions: CursorM
   const option = getServerProviderCatalog("cursor").models.find((candidate) => candidate.id === baseModel)
   if (option && !option.supportsFastMode) return baseModel
   return `${baseModel}-fast`
+}
+
+export interface KimiModelInfo {
+  provider: string
+  model: string
+  displayName?: string
+  maxContextSize: number
+  capabilities?: string[]
+  supportEfforts?: string[]
+  defaultEffort?: string
+}
+
+function deriveEffortLabel(id: string): string {
+  if (id.length === 0) return id
+  return id.split(/[-_]/).map((word) => {
+    if (word.length === 0) return word
+    return word[0]!.toUpperCase() + word.slice(1)
+  }).join(" ")
+}
+
+/**
+ * Replace the kimi provider's model list from the live Kimi server catalog.
+ * The static catalog is a degraded fallback; this is the authoritative source
+ * of Kimi model ids, context windows, and per-model effort options.
+ * Returns true when the catalog changed (callers should broadcast).
+ */
+export function applyKimiModels(models: KimiModelInfo[]): boolean {
+  const kimiIndex = SERVER_PROVIDERS.findIndex((provider) => provider.id === "kimi")
+  const kimiProvider = SERVER_PROVIDERS[kimiIndex]
+  if (!kimiProvider) return false
+
+  if (models.length === 0) return false
+
+  const nextModels: ProviderModelOption[] = models.map((model) => {
+    const efforts: ProviderEffortOption[] = (model.supportEfforts ?? []).map((id) => ({
+      id,
+      label: deriveEffortLabel(id),
+    }))
+    return {
+      id: model.model,
+      label: model.displayName ?? deriveModelLabel(model.model),
+      contextWindowTokens: model.maxContextSize,
+      supportsEffort: efforts.length > 0,
+      ...(efforts.length > 0 ? { supportedReasoningEfforts: efforts } : {}),
+      ...(model.defaultEffort ? { defaultReasoningEffort: model.defaultEffort } : {}),
+    }
+  })
+
+  const firstModel = models[0]!
+  const defaultModel = firstModel.model
+
+  if (
+    defaultModel === kimiProvider.defaultModel
+    && JSON.stringify(nextModels) === JSON.stringify(kimiProvider.models)
+  ) {
+    return false
+  }
+
+  SERVER_PROVIDERS.splice(kimiIndex, 1, {
+    ...kimiProvider,
+    defaultModel,
+    models: nextModels,
+  })
+  return true
+}
+
+export function normalizeKimiModelOptions(
+  model: string,
+  modelOptions?: ModelOptions,
+  legacyEffort?: string,
+): KimiModelOptions {
+  const modelEntry = getServerProviderCatalog("kimi").models.find((candidate) => candidate.id === model)
+  const supported = modelEntry?.supportedReasoningEfforts
+  const fallback = modelEntry?.defaultReasoningEffort ?? DEFAULT_KIMI_MODEL_OPTIONS.reasoningEffort
+  const requested = modelOptions?.kimi?.reasoningEffort ?? legacyEffort
+
+  if (typeof requested === "string" && requested.length > 0) {
+    if (supported && supported.length > 0) {
+      if (supported.some((option) => option.id === requested)) {
+        return { reasoningEffort: requested }
+      }
+    } else {
+      // No live catalog for this model yet — accept any non-empty string so the
+      // runtime can validate it, but still fall back for empty values.
+      return { reasoningEffort: requested }
+    }
+  }
+
+  return { reasoningEffort: fallback }
 }

@@ -13,6 +13,7 @@ import {
   parseGhAccount,
   parseGhUserIdentity,
   parseGhVersion,
+  parseKimiVersion,
   pkceChallengeS256,
   stripAnsi,
   type ExecResult,
@@ -90,6 +91,9 @@ describe("parsers", () => {
     expect(parseCodexVersion("codex-cli 0.145.0")).toBe("0.145.0")
     expect(parseCursorVersion("2026.07.23-e383d2b\n")).toBe("2026.07.23-e383d2b")
     expect(parseGhVersion("gh version 2.96.0 (2026-07-02)\nhttps://github.com/cli/cli/releases/tag/v2.96.0")).toBe("2.96.0")
+    expect(parseKimiVersion("kimi-cli v1.2.3")).toBe("1.2.3")
+    expect(parseKimiVersion("kimi-code 0.4.5")).toBe("0.4.5")
+    expect(parseKimiVersion("kimi 2.0.0 (build abc123)")).toBe("2.0.0")
   })
 
   test("parseClaudeAuthStatus parses the JSON payload", () => {

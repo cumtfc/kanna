@@ -187,6 +187,7 @@ interface ChatTranscriptViewportProps {
   transcriptPaddingBottom: number
   localPath: string | null | undefined
   latestToolIds: KannaState["latestToolIds"]
+  liveTurnDraft: KannaState["liveTurnDraft"]
   isProcessing: boolean
   runtimeStatus: string | null
   isDraining: boolean
@@ -197,6 +198,7 @@ interface ChatTranscriptViewportProps {
   onOpenLocalLink: KannaState["handleOpenLocalLink"]
   onAskUserQuestionSubmit: KannaState["handleAskUserQuestion"]
   onExitPlanModeConfirm: KannaState["handleExitPlanMode"]
+  onApprovalResponse: KannaState["handleApprovalResponse"]
   showScrollButton: boolean
   onIsAtEndChange: (isAtEnd: boolean) => void
   scrollToBottom: () => void
@@ -308,6 +310,7 @@ const TranscriptScrollerBody = memo(function TranscriptScrollerBody({
   transcriptPaddingBottom,
   localPath,
   latestToolIds,
+  liveTurnDraft,
   isProcessing,
   runtimeStatus,
   isDraining,
@@ -318,6 +321,7 @@ const TranscriptScrollerBody = memo(function TranscriptScrollerBody({
   onOpenLocalLink,
   onAskUserQuestionSubmit,
   onExitPlanModeConfirm,
+  onApprovalResponse,
   showScrollButton,
   onIsAtEndChange,
   scrollToBottom,
@@ -354,7 +358,8 @@ const TranscriptScrollerBody = memo(function TranscriptScrollerBody({
     isLoading: isProcessing,
     localPath: localPath ?? undefined,
     latestToolIds,
-  }), [isProcessing, latestToolIds, localPath, messages])
+    liveTurnDraft,
+  }), [isProcessing, latestToolIds, localPath, liveTurnDraft, messages])
   const resolvedRows = useStableResolvedRows(rawRows)
 
   useEffect(() => {
@@ -849,6 +854,7 @@ const TranscriptScrollerBody = memo(function TranscriptScrollerBody({
                       onToolGroupExpandedChange={handleToolGroupExpandedChange}
                       onAskUserQuestionSubmit={onAskUserQuestionSubmit}
                       onExitPlanModeConfirm={onExitPlanModeConfirm}
+                      onApprovalResponse={onApprovalResponse}
                     />
                   </div>
                 </MessageScrollerItem>

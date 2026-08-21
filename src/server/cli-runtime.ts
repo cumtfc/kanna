@@ -31,6 +31,11 @@ export interface CliOptions {
    * ingress can reach the server. Hook for future dev-box-only features.
    */
   directCloud: boolean
+  /**
+   * Allowed cross-origin origins. Requests from these origins are accepted for
+   * CORS and CSRF purposes regardless of http/https scheme differences.
+   */
+  allowedOrigins: string[]
 }
 
 export interface CliUpdateOptions {
@@ -121,6 +126,7 @@ Options:
                        Run a named Cloudflare tunnel from a token
   --password <secret>  Require a password before loading the app
   --strict-port        Fail instead of trying another port
+  --origin <url>       Allow cross-origin requests from this origin (repeatable)
   --no-open            Don't open browser automatically
   --no-cloud           Skip bringing a paired machine online for this run
   --cloud              Run as a cloud dev-box (direct mode, no cloudflared)
@@ -169,6 +175,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
   let strictPort = false
   let noCloud = false
   let directCloud = false
+  const allowedOrigins: string[] = []
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index]
@@ -240,6 +247,13 @@ export function parseArgs(argv: string[]): ParsedArgs {
       strictPort = true
       continue
     }
+    if (arg === "--origin") {
+      const next = argv[index + 1]
+      if (!next || next.startsWith("-")) throw new Error("Missing value for --origin")
+      allowedOrigins.push(next)
+      index += 1
+      continue
+    }
     if (!arg.startsWith("-")) throw new Error(`Unexpected positional argument: ${arg}`)
   }
 
@@ -262,6 +276,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
       strictPort,
       noCloud,
       directCloud,
+      allowedOrigins,
     },
   }
 }

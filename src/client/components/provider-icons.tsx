@@ -66,6 +66,29 @@ export function PiIcon({ className, ...props }: SVGProps<SVGSVGElement>) {
   )
 }
 
+export function KimiIcon({ className, ...props }: SVGProps<SVGSVGElement>) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      aria-hidden="true"
+      className={cn("shrink-0", className)}
+      {...props}
+    >
+      <rect x="2" y="2" width="20" height="20" rx="4" ry="4" />
+      <text
+        x="12"
+        y="17"
+        textAnchor="middle"
+        fill="currentColor"
+        className="text-[10px] font-bold"
+      >
+        K
+      </text>
+    </svg>
+  )
+}
+
 export function GitHubIcon({ className, ...props }: SVGProps<SVGSVGElement>) {
   return (
     <svg
@@ -99,6 +122,7 @@ export const PROVIDER_ICONS: Record<AgentProvider, IconComponent> = {
   codex: OpenAIIcon,
   cursor: CursorIcon,
   pi: PiIcon,
+  kimi: KimiIcon,
 }
 
 export const AUTH_SERVICE_ICONS: Record<AuthServiceId, IconComponent> = {
@@ -106,5 +130,6 @@ export const AUTH_SERVICE_ICONS: Record<AuthServiceId, IconComponent> = {
   codex: OpenAIIcon,
   cursor: CursorIcon,
   gh: GitHubIcon,
+  kimi: KimiIcon,
   openrouter: OpenRouterIcon,
 }

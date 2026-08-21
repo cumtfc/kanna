@@ -22,7 +22,7 @@ type SetupStep = (typeof BASE_STEPS)[number] | "cloud" | "done"
 /** Auto-advance delay after a skippable step connects — long enough to see the ✓ land. */
 const AUTO_ADVANCE_MS = 900
 
-const AGENT_SERVICES: AuthServiceId[] = ["claude", "codex", "cursor"]
+const AGENT_SERVICES: AuthServiceId[] = ["claude", "codex", "cursor", "kimi"]
 
 function StepHeading({ title, description }: { title: string; description: string }) {
   return (

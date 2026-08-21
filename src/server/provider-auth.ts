@@ -42,11 +42,13 @@ const CLI_BINARIES: Record<Exclude<AuthServiceId, "openrouter">, string> = {
   codex: "codex",
   cursor: "cursor-agent",
   gh: "gh",
+  kimi: "kimi",
 }
 
 const NPM_PACKAGES: Partial<Record<AuthServiceId, string>> = {
   claude: "@anthropic-ai/claude-code",
   codex: "@openai/codex",
+  kimi: "@moonshot-ai/kimi-code",
 }
 
 const CODEX_DEVICE_AUTH_HINT =
@@ -105,6 +107,12 @@ export function parseCodexVersion(output: string): string | null {
 export function parseCursorVersion(output: string): string | null {
   const line = output.trim().split("\n")[0]?.trim() ?? ""
   return line.length > 0 ? line : null
+}
+
+export function parseKimiVersion(output: string): string | null {
+  return /kimi(?:-code)?(?:\s+cli)?\s+v?(\d+\.\d+\.\d+)/i.exec(output)?.[1]
+    ?? /(\d+\.\d+\.\d+)/.exec(output)?.[1]
+    ?? null
 }
 
 export function parseGhVersion(output: string): string | null {
@@ -235,6 +243,8 @@ export interface ProviderAuthManagerDeps {
   sleep?: (ms: number) => Promise<void>
   platform?: NodeJS.Platform
   now?: () => number
+  /** Probe the local Kimi Code server for auth state; null when Kimi is unavailable. */
+  probeKimiAuth?: () => Promise<{ signedIn: boolean; account?: string; statusDetail?: string } | null>
 }
 
 // ---------------------------------------------------------------------------
@@ -422,6 +432,7 @@ export class ProviderAuthManager {
       service === "claude" ? parseClaudeVersion(versionOutput)
       : service === "codex" ? parseCodexVersion(versionOutput)
       : service === "cursor" ? parseCursorVersion(versionResult.stdout)
+      : service === "kimi" ? parseKimiVersion(versionOutput)
       : parseGhVersion(versionOutput)
 
     let authStatus: AuthServiceSnapshot["authStatus"] = "signed_out"
@@ -461,6 +472,26 @@ export class ProviderAuthManager {
       const parsed = parseCursorStatus(`${result.stdout}\n${result.stderr}`)
       authStatus = parsed.loggedIn && result.code === 0 ? "signed_in" : "signed_out"
       account = parsed.loggedIn ? parsed.account : null
+    } else if (service === "kimi") {
+      const probe = this.deps.probeKimiAuth
+      if (probe) {
+        try {
+          const result = await probe()
+          if (result) {
+            authStatus = result.signedIn ? "signed_in" : "signed_out"
+            account = result.account ?? null
+            statusDetail = result.statusDetail ?? null
+          } else {
+            authStatus = "error"
+            statusDetail = "Kimi Code server is not reachable."
+          }
+        } catch (error) {
+          authStatus = "error"
+          statusDetail = error instanceof Error ? error.message : String(error)
+        }
+      } else {
+        authStatus = "signed_out"
+      }
     } else {
       const result = await this.deps.exec([binaryPath, "auth", "status"], { timeoutMs: 20_000 })
       if (result.code === 0) {
@@ -493,8 +524,9 @@ export class ProviderAuthManager {
 
     const npmFetcher = this.deps.fetchLatestNpmVersion
     if (npmFetcher) {
-      for (const service of ["claude", "codex"] as const) {
-        const pkg = NPM_PACKAGES[service]!
+      for (const service of ["claude", "codex", "kimi"] as const) {
+        const pkg = NPM_PACKAGES[service]
+        if (!pkg) continue
         try {
           const latest = await npmFetcher(pkg)
           this.patchService(service, { latestVersion: latest })
@@ -580,6 +612,12 @@ export class ProviderAuthManager {
       if (existing) return `${shellQuote(existing)} update`
       return "curl https://cursor.com/install -fsS | bash"
     }
+    if (service === "kimi") {
+      const pkg = NPM_PACKAGES.kimi!
+      if (this.resolvePath("npm")) return `npm install -g ${pkg}`
+      if (this.resolvePath("bun")) return `bun add -g ${pkg}`
+      throw new Error("Neither npm nor bun is available to install the package.")
+    }
     // gh
     if (platform === "darwin") {
       if (this.resolvePath("brew")) return "brew install gh || brew upgrade gh"
@@ -644,6 +682,7 @@ export class ProviderAuthManager {
       service === "gh" ? this.runGhLogin(flow)
       : service === "codex" ? this.runCodexLogin(flow)
       : service === "cursor" ? this.runCursorLogin(flow)
+      : service === "kimi" ? this.runKimiLogin(flow)
       : this.runClaudeLogin(flow)
 
     void run.catch((error) => {
@@ -962,6 +1001,15 @@ export class ProviderAuthManager {
       flow,
       `Cursor sign-in failed: ${truncateOutput(stripAnsi(flow.transcript)) || `exit code ${exitCode}`}`,
       null
+    )
+  }
+
+  private async runKimiLogin(flow: LoginFlowRuntime) {
+    // Kimi sign-in is handled by the Kimi Code CLI / local server OAuth flow.
+    // Kanna does not invent a private credential flow; surface a clear fallback
+    // so the user can sign in via `kimi login` and then refresh provider status.
+    throw new Error(
+      "Sign in to Kimi Code by running `kimi login` in a terminal, then refresh the provider status."
     )
   }
 

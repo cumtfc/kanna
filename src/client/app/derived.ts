@@ -1,7 +1,7 @@
 import type { HydratedTranscriptMessage } from "../../shared/types"
 import type { ProcessedToolCall } from "../components/messages/types"
 
-export const SPECIAL_TOOL_NAMES = ["AskUserQuestion", "ExitPlanMode", "TodoWrite"] as const
+export const SPECIAL_TOOL_NAMES = ["AskUserQuestion", "ExitPlanMode", "Approval", "TodoWrite"] as const
 const RESOLVED_TOOL_NAMES = new Set<string>(["TodoWrite"])
 
 function findLatestUnresolvedToolId(messages: HydratedTranscriptMessage[], toolName: string): string | null {

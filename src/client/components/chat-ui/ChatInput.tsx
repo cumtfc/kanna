@@ -677,6 +677,8 @@ const ChatInputInner = forwardRef<ChatInputHandle, Props>(function ChatInput({
       modelOptions = { cursor: { ...providerPrefs.modelOptions } }
     } else if (providerPrefs.provider === "pi") {
       modelOptions = { pi: { ...providerPrefs.modelOptions } }
+    } else if (providerPrefs.provider === "kimi") {
+      modelOptions = { kimi: { ...providerPrefs.modelOptions } }
     } else {
       modelOptions = { codex: { ...providerPrefs.modelOptions } }
     }
@@ -1032,6 +1034,7 @@ const ChatInputInner = forwardRef<ChatInputHandle, Props>(function ChatInput({
                 case "claudeReasoningEffort":
                 case "codexReasoningEffort":
                 case "piReasoningEffort":
+                case "kimiReasoningEffort":
                   composer.setReasoningEffort(change.effort)
                   break
                 case "contextWindow":

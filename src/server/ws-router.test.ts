@@ -129,6 +129,14 @@ const DEFAULT_APP_SETTINGS_SNAPSHOT: AppSettingsSnapshot = {
       planMode: false,
       autoPlan: false,
     },
+    kimi: {
+      model: "kimi-code/k3",
+      modelOptions: {
+        reasoningEffort: "max",
+      },
+      planMode: false,
+      autoPlan: false,
+    },
   },
   newSidebarEnabled: false,
   newProjectsDirectory: "~/Kanna",

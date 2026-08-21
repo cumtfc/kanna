@@ -1,4 +1,5 @@
 import type {
+  AgentApprovalRequest,
   AskUserQuestionItem,
   AskUserQuestionAnswerMap,
   AskUserQuestionToolResult,
@@ -43,6 +44,15 @@ export function normalizeToolCall(args: {
           plan: typeof input.plan === "string" ? input.plan : undefined,
           summary: typeof input.summary === "string" ? input.summary : undefined,
         },
+        rawInput: input,
+      }
+    case "Approval":
+      return {
+        kind: "tool",
+        toolKind: "approval",
+        toolName,
+        toolId,
+        input: input as unknown as AgentApprovalRequest,
         rawInput: input,
       }
     case "TodoWrite":
@@ -303,6 +313,8 @@ export function hydrateToolResult(tool: NormalizedToolCall, raw: unknown): Hydra
         ...(record?.discarded === true ? { discarded: true } : {}),
       } satisfies ExitPlanModeToolResult
     }
+    case "approval":
+      return parsed as HydratedToolCall["result"]
     case "read_file":
       if (typeof parsed === "string") {
         return parsed

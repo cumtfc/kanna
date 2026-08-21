@@ -1,6 +1,6 @@
 import React, { memo, useMemo, useRef } from "react"
 import type { AskUserQuestionItem, ProcessedToolCall } from "../components/messages/types"
-import type { AskUserQuestionAnswerMap, ChatAttachment, HydratedTranscriptMessage } from "../../shared/types"
+import type { AskUserQuestionAnswerMap, ChatAttachment, HydratedTranscriptMessage, LiveTurnDraft } from "../../shared/types"
 import { UserMessage } from "../components/messages/UserMessage"
 import { RawJsonMessage } from "../components/messages/RawJsonMessage"
 import { SystemMessage, type SessionHandoff, type SessionRestore } from "../components/messages/SystemMessage"
@@ -8,6 +8,7 @@ import { AccountInfoMessage } from "../components/messages/AccountInfoMessage"
 import { TextMessage } from "../components/messages/TextMessage"
 import { AskUserQuestionMessage } from "../components/messages/AskUserQuestionMessage"
 import { ExitPlanModeMessage } from "../components/messages/ExitPlanModeMessage"
+import { ApprovalMessage } from "../components/messages/ApprovalMessage"
 import { TodoWriteMessage } from "../components/messages/TodoWriteMessage"
 import { ToolCallMessage } from "../components/messages/ToolCallMessage"
 import { ResultMessage } from "../components/messages/ResultMessage"
@@ -41,6 +42,7 @@ export interface ResolvedSingleTranscriptRow {
   isFirstAccount: boolean
   isLatestAskUserQuestion: boolean
   isLatestExitPlanMode: boolean
+  isLatestApproval: boolean
   isLatestTodoWrite: boolean
   hideResult: boolean
   isFinalStatus: boolean
@@ -466,6 +468,7 @@ interface TranscriptSingleRowProps {
   isFirstAccount: boolean
   isLatestAskUserQuestion: boolean
   isLatestExitPlanMode: boolean
+  isLatestApproval: boolean
   isLatestTodoWrite: boolean
   hideResult: boolean
   isFinalStatus: boolean
@@ -476,6 +479,7 @@ interface TranscriptSingleRowProps {
     answers: AskUserQuestionAnswerMap
   ) => void
   onExitPlanModeConfirm: (toolUseId: string, confirmed: boolean, clearContext?: boolean, message?: string) => void
+  onApprovalResponse: (toolUseId: string, response: import("../../shared/types").AgentApprovalResponse) => void
 }
 
 const TranscriptSingleRow = memo(function TranscriptSingleRow({
@@ -491,12 +495,14 @@ const TranscriptSingleRow = memo(function TranscriptSingleRow({
   isFirstAccount,
   isLatestAskUserQuestion,
   isLatestExitPlanMode,
+  isLatestApproval,
   isLatestTodoWrite,
   hideResult,
   isFinalStatus,
   nextPromptTimestamp,
   onAskUserQuestionSubmit,
   onExitPlanModeConfirm,
+  onApprovalResponse,
 }: TranscriptSingleRowProps) {
   let rendered: React.ReactNode = null
 
@@ -554,6 +560,17 @@ const TranscriptSingleRow = memo(function TranscriptSingleRow({
           rendered = isLatestTodoWrite ? <TodoWriteMessage key={message.id} message={message} /> : null
           break
         }
+        if (message.toolKind === "approval") {
+          rendered = (
+            <ApprovalMessage
+              key={message.id}
+              message={message}
+              onResponse={onApprovalResponse}
+              isLatest={isLatestApproval}
+            />
+          )
+          break
+        }
         rendered = <ToolCallMessage key={message.id} message={message} isLoading={isLoading} localPath={localPath} />
         break
       case "result":
@@ -605,12 +622,14 @@ const TranscriptSingleRow = memo(function TranscriptSingleRow({
   && prev.isFirstAccount === next.isFirstAccount
   && prev.isLatestAskUserQuestion === next.isLatestAskUserQuestion
   && prev.isLatestExitPlanMode === next.isLatestExitPlanMode
+  && prev.isLatestApproval === next.isLatestApproval
   && prev.isLatestTodoWrite === next.isLatestTodoWrite
   && prev.hideResult === next.hideResult
   && prev.isFinalStatus === next.isFinalStatus
   && prev.nextPromptTimestamp === next.nextPromptTimestamp
   && prev.onAskUserQuestionSubmit === next.onAskUserQuestionSubmit
   && prev.onExitPlanModeConfirm === next.onExitPlanModeConfirm
+  && prev.onApprovalResponse === next.onApprovalResponse
   && sameMessage(prev.message, next.message)
 ))
 
@@ -663,10 +682,12 @@ export function buildResolvedTranscriptRows(
     isLoading,
     localPath,
     latestToolIds,
+    liveTurnDraft,
   }: {
     isLoading: boolean
     localPath?: string
     latestToolIds: Record<string, string | null>
+    liveTurnDraft?: LiveTurnDraft
     /** True when the loaded window may not include the start of the transcript. */
   }
 ): ResolvedTranscriptRow[] {
@@ -703,6 +724,7 @@ export function buildResolvedTranscriptRows(
       isFirstAccount: renderState.isFirstAccount,
       isLatestAskUserQuestion: item.message.id === latestToolIds.AskUserQuestion,
       isLatestExitPlanMode: item.message.id === latestToolIds.ExitPlanMode,
+      isLatestApproval: item.message.id === latestToolIds.Approval,
       isLatestTodoWrite: renderState.isLatestTodoWrite,
       hideResult: renderState.hideResult,
       isFinalStatus: renderState.isFinalStatus,
@@ -712,6 +734,60 @@ export function buildResolvedTranscriptRows(
     if (renderState.shouldRender) {
       rows.push(row)
     }
+  }
+
+  // Render ephemeral live provider text drafts as the last active blocks. These
+  // are in-memory only and are cleared as soon as the final transcript entry
+  // arrives, so they never accumulate or persist.
+  const now = new Date().toISOString()
+  if (liveTurnDraft?.assistantText) {
+    rows.push({
+      kind: "single",
+      id: "live-draft-assistant",
+      message: {
+        id: "live-draft-assistant",
+        kind: "assistant_text",
+        text: liveTurnDraft.assistantText,
+        timestamp: now,
+      },
+      index: messages.length,
+      isLoading: isLoading,
+      localPath,
+      isFirstSystem: false,
+      isModelChange: false,
+      isFirstAccount: false,
+      isLatestAskUserQuestion: false,
+      isLatestExitPlanMode: false,
+      isLatestApproval: false,
+      isLatestTodoWrite: false,
+      hideResult: false,
+      isFinalStatus: true,
+    })
+  }
+
+  if (liveTurnDraft?.reasoningText) {
+    rows.push({
+      kind: "single",
+      id: "live-draft-reasoning",
+      message: {
+        id: "live-draft-reasoning",
+        kind: "status",
+        status: liveTurnDraft.reasoningText,
+        timestamp: now,
+      },
+      index: messages.length + 1,
+      isLoading: isLoading,
+      localPath,
+      isFirstSystem: false,
+      isModelChange: false,
+      isFirstAccount: false,
+      isLatestAskUserQuestion: false,
+      isLatestExitPlanMode: false,
+      isLatestApproval: false,
+      isLatestTodoWrite: false,
+      hideResult: false,
+      isFinalStatus: true,
+    })
   }
 
   return rows
@@ -735,6 +811,7 @@ interface KannaTranscriptRowProps {
     answers: AskUserQuestionAnswerMap
   ) => void
   onExitPlanModeConfirm: (toolUseId: string, confirmed: boolean, clearContext?: boolean, message?: string) => void
+  onApprovalResponse: (toolUseId: string, response: import("../../shared/types").AgentApprovalResponse) => void
 }
 
 export const KannaTranscriptRow = memo(function KannaTranscriptRow({
@@ -744,6 +821,7 @@ export const KannaTranscriptRow = memo(function KannaTranscriptRow({
   onToolGroupExpandedChange,
   onAskUserQuestionSubmit,
   onExitPlanModeConfirm,
+  onApprovalResponse,
 }: KannaTranscriptRowProps) {
   if (row.kind === "tool-group") {
     return (
@@ -773,12 +851,14 @@ export const KannaTranscriptRow = memo(function KannaTranscriptRow({
       isFirstAccount={row.isFirstAccount}
       isLatestAskUserQuestion={row.isLatestAskUserQuestion}
       isLatestExitPlanMode={row.isLatestExitPlanMode}
+      isLatestApproval={row.isLatestApproval}
       isLatestTodoWrite={row.isLatestTodoWrite}
       hideResult={row.hideResult}
       isFinalStatus={row.isFinalStatus}
       nextPromptTimestamp={row.nextPromptTimestamp}
       onAskUserQuestionSubmit={onAskUserQuestionSubmit}
       onExitPlanModeConfirm={onExitPlanModeConfirm}
+      onApprovalResponse={onApprovalResponse}
     />
   )
 }, (prev, next) => {
@@ -789,6 +869,7 @@ export const KannaTranscriptRow = memo(function KannaTranscriptRow({
   if (prev.onToolGroupExpandedChange !== next.onToolGroupExpandedChange) return false
   if (prev.onAskUserQuestionSubmit !== next.onAskUserQuestionSubmit) return false
   if (prev.onExitPlanModeConfirm !== next.onExitPlanModeConfirm) return false
+  if (prev.onApprovalResponse !== next.onApprovalResponse) return false
   if (prev.row.kind !== next.row.kind) return false
   if (prev.row.id !== next.row.id) return false
 
@@ -813,6 +894,7 @@ export const KannaTranscriptRow = memo(function KannaTranscriptRow({
       && prev.row.isFirstAccount === next.row.isFirstAccount
       && prev.row.isLatestAskUserQuestion === next.row.isLatestAskUserQuestion
       && prev.row.isLatestExitPlanMode === next.row.isLatestExitPlanMode
+      && prev.row.isLatestApproval === next.row.isLatestApproval
       && prev.row.isLatestTodoWrite === next.row.isLatestTodoWrite
       && prev.row.hideResult === next.row.hideResult
       && prev.row.isFinalStatus === next.row.isFinalStatus

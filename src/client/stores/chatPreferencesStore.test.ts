@@ -107,6 +107,12 @@ describe("migrateChatPreferencesState", () => {
           planMode: false,
           autoPlan: false,
         },
+        kimi: {
+          model: "kimi-code/k3",
+          modelOptions: { reasoningEffort: "max" },
+          planMode: false,
+          autoPlan: false,
+        },
       },
       chatStates: {},
       legacyComposerState: {

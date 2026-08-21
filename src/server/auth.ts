@@ -56,6 +56,30 @@ function effectiveOrigin(req: Request, trustProxy: boolean): string {
   return `${scheme}://${url.host}`
 }
 
+function originKey(origin: string): { hostname: string; port: string } | null {
+  try {
+    const url = new URL(origin)
+    return { hostname: url.hostname, port: url.port || defaultPort(url.protocol) }
+  } catch {
+    return null
+  }
+}
+
+function defaultPort(protocol: string): string {
+  return protocol === "https:" ? "443" : protocol === "http:" ? "80" : ""
+}
+
+function isSameHostPort(a: string, b: string): boolean {
+  const keyA = originKey(a)
+  const keyB = originKey(b)
+  if (!keyA || !keyB) return false
+  return keyA.hostname === keyB.hostname && keyA.port === keyB.port
+}
+
+function matchesAllowedOrigin(origin: string, allowedOrigins: string[]): boolean {
+  return allowedOrigins.some((allowed) => isSameHostPort(origin, allowed))
+}
+
 function shouldUseSecureCookie(req: Request, trustProxy: boolean) {
   if (trustProxy) {
     const proto = forwardedProto(req)
@@ -109,12 +133,21 @@ export interface AuthManagerOptions {
    * proxy such as cloudflared.
    */
   trustProxy?: boolean
+  /**
+   * Explicit list of allowed cross-origin origins. When provided, the auth
+   * layer accepts requests whose Origin header matches any entry by
+   * hostname and port, ignoring the scheme (http vs https). This is intended
+   * for LAN/reverse-proxy setups where the public-facing scheme differs from
+   * the local server scheme.
+   */
+  allowedOrigins?: string[]
 }
 
 export function createAuthManager(password: string, options: AuthManagerOptions = {}): AuthManager {
   const sessions = new Set<string>()
   const expectedPassword = Buffer.from(password)
   const trustProxy = options.trustProxy ?? false
+  const allowedOrigins = options.allowedOrigins ?? []
 
   function getSessionToken(req: Request) {
     return parseCookies(req.headers.get("cookie")).get(SESSION_COOKIE_NAME) ?? null
@@ -129,8 +162,9 @@ export function createAuthManager(password: string, options: AuthManagerOptions 
     const origin = req.headers.get("origin")
     if (!origin) return true
     if (origin === new URL(req.url).origin) return true
+    if (allowedOrigins.length > 0 && matchesAllowedOrigin(origin, allowedOrigins)) return true
     if (!trustProxy) return false
-    return origin === effectiveOrigin(req, trustProxy)
+    return isSameHostPort(origin, effectiveOrigin(req, trustProxy))
   }
 
   function createSessionCookie(req: Request) {

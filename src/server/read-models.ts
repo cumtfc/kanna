@@ -6,6 +6,7 @@ import type {
   ChatTouchedFile,
   ChatTouchedFilesResult,
   KannaStatus,
+  LiveTurnDraft,
   LocalProjectsSnapshot,
   SidebarChatRow,
   SidebarData,
@@ -373,7 +374,8 @@ export function deriveChatSnapshot(
   activeStatuses: Map<string, KannaStatus>,
   drainingChatIds: Set<string>,
   chatId: string,
-  getMessages: (chatId: string) => Pick<ChatSnapshot, "messages" | "startIndex" | "readAnchor">
+  getMessages: (chatId: string) => Pick<ChatSnapshot, "messages" | "startIndex" | "readAnchor">,
+  getLiveTurnDraft?: (chatId: string) => LiveTurnDraft | null
 ): ChatSnapshot | null {
   const chat = state.chatsById.get(chatId)
   if (!chat || chat.deletedAt) return null
@@ -394,6 +396,7 @@ export function deriveChatSnapshot(
   }
 
   const transcript = getMessages(chat.id)
+  const liveTurnDraft = getLiveTurnDraft?.(chat.id) ?? undefined
 
   return {
     runtime,
@@ -405,5 +408,6 @@ export function deriveChatSnapshot(
     startIndex: transcript.startIndex,
     availableProviders: [...SERVER_PROVIDERS],
     readAnchor: transcript.readAnchor,
+    ...(liveTurnDraft ? { liveTurnDraft } : {}),
   }
 }

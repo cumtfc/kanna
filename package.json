@@ -47,6 +47,7 @@
     "start": "bun run ./src/server/cli.ts",
     "test": "bun test",
     "test:cloud": "bun test ./src/server/cloud/wire.e2e.ts",
+    "test:kimi-smoke": "KANNA_KIMI_SMOKE=1 bun run ./scripts/smoke-kimi.ts",
     "prepublishOnly": "bun run build"
   },
   "dependencies": {

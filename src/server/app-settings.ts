@@ -43,6 +43,7 @@ interface AppSettingsFile {
     codex?: ProviderPreferenceInput
     cursor?: ProviderPreferenceInput
     pi?: ProviderPreferenceInput
+    kimi?: ProviderPreferenceInput
   }
   newSidebarEnabled?: unknown
   newProjectsDirectory?: unknown

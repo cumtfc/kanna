@@ -1013,6 +1013,7 @@ export function ChatPage() {
           transcriptPaddingBottom={transcriptPaddingBottom}
           localPath={state.runtime?.localPath}
           latestToolIds={state.latestToolIds}
+          liveTurnDraft={state.liveTurnDraft}
           isProcessing={state.isProcessing}
           runtimeStatus={state.runtimeStatus}
           isDraining={state.isDraining}
@@ -1026,6 +1027,7 @@ export function ChatPage() {
           platform={state.localProjects?.machine.platform}
           onAskUserQuestionSubmit={state.handleAskUserQuestion}
           onExitPlanModeConfirm={state.handleExitPlanMode}
+          onApprovalResponse={state.handleApprovalResponse}
           showScrollButton={showScrollToBottom && state.messages.length > 0}
           onIsAtEndChange={onIsAtEndChange}
           readAnchorState={state.readAnchorState}

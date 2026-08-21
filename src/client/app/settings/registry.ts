@@ -164,6 +164,12 @@ export const SETTINGS_ROWS = defineRows({
     description: "Saved defaults when using Pi (connects through the Model Registry).",
     keywords: ["model"],
   },
+  kimiDefaults: {
+    sectionId: "providers",
+    title: "Kimi Code Defaults",
+    description: "Saved defaults when using Kimi Code.",
+    keywords: ["model"],
+  },
   modelRegistry: {
     sectionId: "providers",
     title: "Model Registry",

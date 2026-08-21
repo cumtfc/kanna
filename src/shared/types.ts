@@ -1,7 +1,7 @@
 export const STORE_VERSION = 2 as const
 export const PROTOCOL_VERSION = 1 as const
 
-export type AgentProvider = "claude" | "codex" | "cursor" | "pi"
+export type AgentProvider = "claude" | "codex" | "cursor" | "pi" | "kimi"
 export type LlmProviderKind = "openai" | "openrouter" | "custom"
 export type AppThemePreference = "light" | "dark" | "system"
 export type ChatSoundPreference = "never" | "unfocused" | "always"
@@ -183,8 +183,8 @@ export interface ProviderModelOption {
   label: string
   supportsEffort: boolean
   aliases?: readonly string[]
-  supportedReasoningEfforts?: readonly CodexReasoningEffortOption[]
-  defaultReasoningEffort?: CodexReasoningEffort
+  supportedReasoningEfforts?: readonly ProviderEffortOption[]
+  defaultReasoningEffort?: string
   supportsFastMode?: boolean
   contextWindowOptions?: readonly ProviderContextWindowOption[]
   /**
@@ -270,11 +270,16 @@ export interface PiModelOptions {
   reasoningEffort: PiReasoningEffort
 }
 
+export interface KimiModelOptions {
+  reasoningEffort: string
+}
+
 export interface ProviderModelOptionsByProvider {
   claude: ClaudeModelOptions
   codex: CodexModelOptions
   cursor: CursorModelOptions
   pi: PiModelOptions
+  kimi: KimiModelOptions
 }
 
 export interface ProviderPreference<TModelOptions> {
@@ -326,6 +331,7 @@ export type ChatProviderPreferences = {
   codex: ProviderPreference<CodexModelOptions>
   cursor: ProviderPreference<CursorModelOptions>
   pi: ProviderPreference<PiModelOptions>
+  kimi: ProviderPreference<KimiModelOptions>
 }
 
 export type ModelOptions = Partial<{
@@ -352,6 +358,12 @@ export const DEFAULT_PI_MODEL = "~anthropic/claude-fable-latest"
 export const DEFAULT_PI_MODEL_OPTIONS = {
   reasoningEffort: "medium",
 } as const satisfies PiModelOptions
+
+export const DEFAULT_KIMI_MODEL = "kimi-code/k3"
+
+export const DEFAULT_KIMI_MODEL_OPTIONS = {
+  reasoningEffort: "max",
+} as const satisfies KimiModelOptions
 
 export function isClaudeReasoningEffort(value: unknown): value is ClaudeReasoningEffort {
   return CLAUDE_REASONING_OPTIONS.some((option) => option.id === value)
@@ -657,6 +669,26 @@ export const PROVIDERS: ProviderCatalogEntry[] = [
     models: piModelOptionsFromFaves(DEFAULT_PI_FAVE_MODELS),
     efforts: [...PI_REASONING_OPTIONS],
   },
+  {
+    // Kimi Code local-server integration. This static catalog is a cold-start
+    // fallback only; the server replaces it from `GET /api/v1/models` once
+    // the Kimi server is reachable (see applyKimiModels in provider-catalog).
+    id: "kimi",
+    label: "Kimi Code",
+    defaultModel: DEFAULT_KIMI_MODEL,
+    defaultEffort: "max",
+    supportsPlanMode: true,
+    supportsAutoPlanMode: false,
+    models: [{
+      id: DEFAULT_KIMI_MODEL,
+      label: "K3",
+      supportsEffort: true,
+      supportedReasoningEfforts: [{ id: "max", label: "Max" }],
+      defaultReasoningEffort: "max",
+      contextWindowTokens: 1_048_576,
+    }],
+    efforts: [{ id: "max", label: "Max" }],
+  },
 ]
 
 export function getProviderCatalog(provider: AgentProvider): ProviderCatalogEntry {
@@ -696,6 +728,13 @@ export function normalizeProviderModelId(
   }
   if (provider === "cursor") {
     return normalizeCursorModelId(modelId, fallbackModelId ?? getProviderCatalog(provider).defaultModel)
+  }
+  if (provider === "kimi") {
+    // The static catalog is a cold-start fallback; the real list comes from
+    // the Kimi server's model discovery. Like pi/cursor, unknown ids pass
+    // through so the server can validate them against the live catalog.
+    const trimmed = typeof modelId === "string" ? modelId.trim() : ""
+    return trimmed || fallbackModelId || getProviderCatalog(provider).defaultModel
   }
   const match = getProviderModelMatch(provider, modelId)
   if (match) return match.id
@@ -748,7 +787,7 @@ export function getCodexModelOption(modelId: string): ProviderModelOption | unde
 }
 
 export function getCodexReasoningOptions(modelId: string): readonly CodexReasoningEffortOption[] {
-  return getCodexModelOption(modelId)?.supportedReasoningEfforts ?? CODEX_REASONING_OPTIONS
+  return (getCodexModelOption(modelId)?.supportedReasoningEfforts ?? CODEX_REASONING_OPTIONS) as readonly CodexReasoningEffortOption[]
 }
 
 export function normalizeCodexReasoningEffort(
@@ -769,7 +808,7 @@ export function normalizeCodexReasoningEffort(
     return effort
   }
 
-  return model?.defaultReasoningEffort ?? DEFAULT_CODEX_MODEL_OPTIONS.reasoningEffort
+  return (model?.defaultReasoningEffort as CodexReasoningEffort | undefined) ?? DEFAULT_CODEX_MODEL_OPTIONS.reasoningEffort
 }
 
 export function supportsClaudeMaxReasoningEffort(modelId: string): boolean {
@@ -1126,6 +1165,9 @@ export interface AppSettingsPatch {
     pi?: Partial<Omit<ProviderPreference<PiModelOptions>, "modelOptions">> & {
       modelOptions?: Partial<PiModelOptions>
     }
+    kimi?: Partial<Omit<ProviderPreference<KimiModelOptions>, "modelOptions">> & {
+      modelOptions?: Partial<KimiModelOptions>
+    }
   }
 }
 
@@ -1210,15 +1252,16 @@ export interface UsageLimitsSnapshot {
 // the coding-agent CLIs (claude, codex, cursor-agent), gh, and OpenRouter.
 // ---------------------------------------------------------------------------
 
-export type AuthServiceId = "claude" | "codex" | "cursor" | "gh" | "openrouter"
+export type AuthServiceId = "claude" | "codex" | "cursor" | "gh" | "kimi" | "openrouter"
 
-export const AUTH_SERVICE_ORDER: AuthServiceId[] = ["claude", "codex", "cursor", "gh", "openrouter"]
+export const AUTH_SERVICE_ORDER: AuthServiceId[] = ["claude", "codex", "cursor", "gh", "kimi", "openrouter"]
 
 export const AUTH_SERVICE_LABELS: Record<AuthServiceId, string> = {
   claude: "Claude Code",
   codex: "Codex",
   cursor: "Cursor",
   gh: "GitHub",
+  kimi: "Kimi Code",
   openrouter: "OpenRouter",
 }
 
@@ -1281,7 +1324,7 @@ export interface ProviderAuthSnapshot {
  * OpenAI-compatible endpoint — don't conflate it with the OpenRouter card).
  */
 export function authServiceForProvider(provider: AgentProvider): AuthServiceId | null {
-  if (provider === "claude" || provider === "codex" || provider === "cursor") return provider
+  if (provider === "claude" || provider === "codex" || provider === "cursor" || provider === "kimi") return provider
   return null
 }
 
@@ -1413,6 +1456,33 @@ export interface AskUserQuestionItem {
 
 export type AskUserQuestionAnswerMap = Record<string, string[]>
 
+export interface AgentApprovalOption {
+  id: "approve" | "approve_session" | "reject" | "cancel"
+  label: string
+}
+
+export interface AgentApprovalPlanExit {
+  plan?: string
+  options?: Array<{ label: string; description?: string }>
+}
+
+export interface AgentApprovalRequest {
+  id: string
+  toolId: string
+  toolName: string
+  action: string
+  input: unknown
+  options: AgentApprovalOption[]
+  planExit?: AgentApprovalPlanExit
+}
+
+export interface AgentApprovalResponse {
+  decision: "approved" | "rejected" | "cancelled"
+  scope?: "session"
+  feedback?: string
+  selectedLabel?: string
+}
+
 export interface TodoItem {
   content: string
   status: "pending" | "in_progress" | "completed"
@@ -1451,6 +1521,9 @@ export interface AskUserQuestionToolCall
 
 export interface ExitPlanModeToolCall
   extends ToolCallBase<"exit_plan_mode", { plan?: string; summary?: string }> { }
+
+export interface ApprovalToolCall
+  extends ToolCallBase<"approval", AgentApprovalRequest> { }
 
 export interface TodoWriteToolCall
   extends ToolCallBase<"todo_write", { todos: TodoItem[] }> { }
@@ -1494,6 +1567,7 @@ export interface UnknownToolCall
 export type NormalizedToolCall =
   | AskUserQuestionToolCall
   | ExitPlanModeToolCall
+  | ApprovalToolCall
   | TodoWriteToolCall
   | SkillToolCall
   | GlobToolCall
@@ -1896,6 +1970,7 @@ export interface ExitPlanModeToolResult {
 interface HydratedToolResultOverrides {
   ask_user_question: AskUserQuestionToolResult
   exit_plan_mode: ExitPlanModeToolResult
+  approval: AgentApprovalResponse
   read_file: ReadFileToolResult | string
 }
 
@@ -1974,10 +2049,17 @@ export interface ChatRuntime {
   sessionToken: string | null
 }
 
+export interface LiveTurnDraft {
+  assistantText: string
+  reasoningText: string
+}
+
 export interface ChatSnapshot {
   runtime: ChatRuntime
   queuedMessages: QueuedChatMessage[]
   messages: TranscriptEntry[]
+  /** Ephemeral in-memory live text draft; not persisted to the EventStore. */
+  liveTurnDraft?: LiveTurnDraft
   /**
    * Absolute index of `messages[0]` in the transcript. Always 0 on a full
    * snapshot; non-zero on an incremental one, where it says where the slice
@@ -2027,5 +2109,5 @@ export interface ResolvedChatReadAnchor {
 
 export interface PendingToolSnapshot {
   toolUseId: string
-  toolKind: "ask_user_question" | "exit_plan_mode"
+  toolKind: "ask_user_question" | "exit_plan_mode" | "approval"
 }

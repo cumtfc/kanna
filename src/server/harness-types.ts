@@ -1,9 +1,26 @@
-import type { AccountInfo, AgentProvider, NormalizedToolCall, TranscriptEntry } from "../shared/types"
+import type {
+  AccountInfo,
+  AgentApprovalRequest,
+  AgentApprovalResponse,
+  AgentProvider,
+  NormalizedToolCall,
+  TranscriptEntry,
+} from "../shared/types"
+
+export type HarnessApprovalRequest = AgentApprovalRequest
+export type HarnessApprovalResponse = AgentApprovalResponse
+
+export interface HarnessLiveTextDelta {
+  channel: "assistant" | "reasoning"
+  text: string
+  offset: number
+}
 
 export interface HarnessEvent {
-  type: "transcript" | "session_token"
+  type: "transcript" | "session_token" | "live_text_delta"
   entry?: TranscriptEntry
   sessionToken?: string
+  delta?: HarnessLiveTextDelta
 }
 
 export interface HarnessToolRequest {
@@ -16,4 +33,11 @@ export interface HarnessTurn {
   getAccountInfo?: () => Promise<AccountInfo | null>
   interrupt: () => Promise<void>
   close: () => void
+  steer?: (input: {
+    content: string
+    attachments: import("../shared/types").ChatAttachment[]
+    model?: string
+    effort?: string
+    planMode?: boolean
+  }) => Promise<"steered" | "started_new_turn">
 }

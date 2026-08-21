@@ -2,6 +2,8 @@ import {
   DEFAULT_CLAUDE_MODEL_OPTIONS,
   DEFAULT_CODEX_MODEL_OPTIONS,
   DEFAULT_CURSOR_MODEL_OPTIONS,
+  DEFAULT_KIMI_MODEL,
+  DEFAULT_KIMI_MODEL_OPTIONS,
   isClaudeReasoningEffort,
   isCodexReasoningEffort,
   isPiReasoningEffort,
@@ -20,6 +22,7 @@ import {
   type ClaudeModelOptions,
   type CodexModelOptions,
   type CursorModelOptions,
+  type KimiModelOptions,
   type PiModelOptions,
   type ProviderPreference,
 } from "./types"
@@ -127,6 +130,31 @@ export function normalizePiPreference(value?: ProviderPreferenceInput): Provider
   }
 }
 
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0
+}
+
+export function normalizeKimiPreference(value?: ProviderPreferenceInput): ProviderPreference<KimiModelOptions> {
+  const reasoningEffort = value?.modelOptions?.reasoningEffort
+  return {
+    model: isNonEmptyString(value?.model)
+      ? value.model.trim()
+      : DEFAULT_KIMI_MODEL,
+    modelOptions: {
+      // Kimi's supported efforts are model-specific and discovered at runtime,
+      // so the normalizer accepts any non-empty string rather than a hardcoded
+      // enum. The server clamps against the live catalog when spawning.
+      reasoningEffort: isNonEmptyString(reasoningEffort)
+        ? reasoningEffort.trim()
+        : isNonEmptyString(value?.effort)
+          ? value.effort.trim()
+          : DEFAULT_KIMI_MODEL_OPTIONS.reasoningEffort,
+    },
+    planMode: value?.planMode === true,
+    autoPlan: false,
+  }
+}
+
 // Exhaustive provider dispatch: the record is keyed by AgentProvider, so adding a
 // provider to AgentProvider forces a new entry here instead of silently falling
 // through to one provider's branch.
@@ -137,6 +165,7 @@ export const PROVIDER_NORMALIZERS: {
   codex: normalizeCodexPreference,
   cursor: normalizeCursorPreference,
   pi: normalizePiPreference,
+  kimi: normalizeKimiPreference,
 }
 
 export function normalizeProviderPreference<TProvider extends AgentProvider>(
@@ -154,6 +183,7 @@ export function normalizeProviderDefaults(
     codex: normalizeCodexPreference(value?.codex),
     cursor: normalizeCursorPreference(value?.cursor),
     pi: normalizePiPreference(value?.pi),
+    kimi: normalizeKimiPreference(value?.kimi),
   }
 }
 
@@ -202,6 +232,14 @@ export function mergeProviderDefaultsPatch(
       modelOptions: {
         ...current.pi.modelOptions,
         ...patch?.pi?.modelOptions,
+      },
+    },
+    kimi: {
+      ...current.kimi,
+      ...patch?.kimi,
+      modelOptions: {
+        ...current.kimi.modelOptions,
+        ...patch?.kimi?.modelOptions,
       },
     },
   }
