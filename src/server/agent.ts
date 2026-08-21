@@ -1,6 +1,8 @@
 import { query, type CanUseTool, type PermissionResult, type Query, type SDKUserMessage, type SlashCommand } from "@anthropic-ai/claude-agent-sdk"
 import { homedir } from "node:os"
 import type {
+  AgentApprovalRequest,
+  AgentApprovalResponse,
   AgentProvider,
   ChatAttachment,
   ChatSkillsSnapshot,
@@ -24,6 +26,7 @@ import { NoopAnalyticsReporter } from "./analytics"
 import { CodexAppServerManager } from "./codex-app-server"
 import { CursorCliManager } from "./cursor-cli"
 import { PiAgentManager, resolvePiConnection } from "./pi-agent"
+import { KimiCodeManager } from "./kimi-code"
 import { type GenerateChatTitleResult, generateTitleForChatDetailed } from "./generate-title"
 import type { ClaudeRateLimitInfoRaw, ClaudeUsageRaw } from "./usage-limits"
 import type { HarnessEvent, HarnessToolRequest, HarnessTurn } from "./harness-types"
@@ -51,6 +54,7 @@ import {
   normalizeClaudeModelOptions,
   normalizeCodexModelOptions,
   normalizeCursorModelOptions,
+  normalizeKimiModelOptions,
   normalizePiModelOptions,
   normalizeServerModel,
   serviceTierFromModelOptions,
@@ -106,11 +110,25 @@ export function claudeToolset(autoPlan: boolean): string[] {
   return autoPlan ? [...CLAUDE_BASE_TOOLSET, "EnterPlanMode"] : [...CLAUDE_BASE_TOOLSET]
 }
 
-interface PendingToolRequest {
-  toolUseId: string
-  tool: NormalizedToolCall & { toolKind: "ask_user_question" | "exit_plan_mode" }
-  resolve: (result: unknown) => void
-}
+type PendingInteraction =
+  | {
+      kind: "ask_user_question"
+      toolUseId: string
+      tool: NormalizedToolCall & { toolKind: "ask_user_question" }
+      resolve: (result: unknown) => void
+    }
+  | {
+      kind: "exit_plan_mode"
+      toolUseId: string
+      tool: NormalizedToolCall & { toolKind: "exit_plan_mode" }
+      resolve: (result: unknown) => void
+    }
+  | {
+      kind: "approval"
+      toolUseId: string
+      request: AgentApprovalRequest
+      resolve: (result: AgentApprovalResponse) => void
+    }
 
 interface ActiveTurn {
   chatId: string
@@ -123,7 +141,7 @@ interface ActiveTurn {
   planMode: boolean
   autoPlan: boolean
   status: KannaStatus
-  pendingTool: PendingToolRequest | null
+  pendingInteraction: PendingInteraction | null
   postToolFollowUp: { content: string; planMode: boolean } | null
   hasFinalResult: boolean
   cancelRequested: boolean
@@ -191,6 +209,7 @@ interface AgentCoordinatorArgs {
   codexManager?: CodexAppServerManager
   cursorManager?: CursorCliManager
   piManager?: PiAgentManager
+  kimiManager?: KimiCodeManager
   resolvePiConnection?: () => Promise<import("./pi-agent").PiConnection | null>
   generateTitle?: (messageContent: string, cwd: string) => Promise<GenerateChatTitleResult>
   startClaudeSession?: (args: {
@@ -835,6 +854,7 @@ export class AgentCoordinator {
   private readonly codexManager: CodexAppServerManager
   private readonly cursorManager: CursorCliManager
   private readonly piManager: PiAgentManager
+  private readonly kimiManager: KimiCodeManager
   private readonly resolvePiConnection: () => Promise<import("./pi-agent").PiConnection | null>
   private readonly generateTitle: (messageContent: string, cwd: string) => Promise<GenerateChatTitleResult>
   private readonly startClaudeSessionFn: NonNullable<AgentCoordinatorArgs["startClaudeSession"]>
@@ -842,6 +862,7 @@ export class AgentCoordinator {
   private reportBackgroundError: ((message: string) => void) | null = null
   private onClaudeRateLimit: ((info: ClaudeRateLimitInfoRaw) => void) | null = null
   private cursorModelCatalogApplied = false
+  private kimiModelCatalogApplied = false
   readonly activeTurns = new Map<string, ActiveTurn>()
   readonly drainingStreams = new Map<string, { turn: HarnessTurn }>()
   readonly claudeSessions = new Map<string, ClaudeSessionState>()
@@ -854,6 +875,7 @@ export class AgentCoordinator {
     this.codexManager = args.codexManager ?? new CodexAppServerManager()
     this.cursorManager = args.cursorManager ?? new CursorCliManager()
     this.piManager = args.piManager ?? new PiAgentManager()
+    this.kimiManager = args.kimiManager ?? new KimiCodeManager()
     this.resolvePiConnection = args.resolvePiConnection ?? resolvePiConnection
     this.generateTitle = args.generateTitle ?? generateTitleForChatDetailed
     this.startClaudeSessionFn = args.startClaudeSession ?? startClaudeSession
@@ -919,9 +941,9 @@ export class AgentCoordinator {
   }
 
   getPendingTool(chatId: string): PendingToolSnapshot | null {
-    const pending = this.activeTurns.get(chatId)?.pendingTool
+    const pending = this.activeTurns.get(chatId)?.pendingInteraction
     if (!pending) return null
-    return { toolUseId: pending.toolUseId, toolKind: pending.tool.toolKind }
+    return { toolUseId: pending.toolUseId, toolKind: pending.kind }
   }
 
   getLiveTurnDraft(chatId: string): LiveTurnDraft | null {
@@ -971,6 +993,24 @@ export class AgentCoordinator {
     }
   }
 
+  /**
+   * Overlay the live Kimi model list on the catalog. Failure is expected when
+   * the Kimi server is not running or the user is not signed in, so it stays
+   * quiet and the static fallback catalog remains in place.
+   */
+  async refreshKimiModelCatalog() {
+    if (this.kimiModelCatalogApplied) return
+    try {
+      const applied = await this.kimiManager.refreshModelCatalog()
+      this.kimiModelCatalogApplied = applied
+      if (applied) {
+        this.emitStateChange(undefined, { immediate: true })
+      }
+    } catch {
+      // Keep the static fallback catalog; the next Kimi turn retries.
+    }
+  }
+
 
   async stopDraining(chatId: string) {
     const draining = this.drainingStreams.get(chatId)
@@ -988,6 +1028,7 @@ export class AgentCoordinator {
       this.claudeSessions.delete(chatId)
     }
     this.piManager.closeChat(chatId)
+    this.kimiManager.closeChat(chatId)
     this.emitStateChange(chatId)
   }
 
@@ -1032,6 +1073,18 @@ export class AgentCoordinator {
         effort: modelOptions.reasoningEffort,
         serviceTier: undefined,
         planMode: false,
+        autoPlan: false,
+      }
+    }
+
+    if (provider === "kimi") {
+      const model = normalizeServerModel(provider, options.model)
+      const modelOptions = normalizeKimiModelOptions(model, options.modelOptions, options.effort)
+      return {
+        model,
+        effort: modelOptions.reasoningEffort,
+        serviceTier: undefined,
+        planMode: catalog.supportsPlanMode ? Boolean(options.planMode) : false,
         autoPlan: false,
       }
     }
@@ -1134,6 +1187,7 @@ export class AgentCoordinator {
     // token actually takes effect. Cursor spawns per turn — nothing to close.
     this.codexManager.stopSession(chatId)
     this.piManager.closeChat(chatId)
+    this.kimiManager.closeChat(chatId)
     this.liveTurnDrafts.delete(chatId)
     await this.store.setSessionToken(chatId, null)
     await this.store.setPendingForkSessionToken(chatId, null)
@@ -1198,6 +1252,15 @@ export class AgentCoordinator {
             pendingForkSessionToken: null,
           })
           return started?.resumeFellBack === true
+        } catch {
+          return false
+        }
+      }
+      case "kimi": {
+        if (!args.sessionToken || args.pendingForkSessionToken) return false
+        try {
+          const status = await this.kimiManager.checkSession(args.sessionToken)
+          return status === "missing"
         } catch {
           return false
         }
@@ -1336,9 +1399,41 @@ export class AgentCoordinator {
       this.emitStateChange(args.chatId)
 
       return await new Promise<unknown>((resolve) => {
-        active.pendingTool = {
-          toolUseId: request.tool.toolId,
-          tool: request.tool,
+        const toolKind = request.tool.toolKind
+        if (toolKind === "ask_user_question") {
+          active.pendingInteraction = {
+            kind: "ask_user_question",
+            toolUseId: request.tool.toolId,
+            tool: request.tool as typeof request.tool & { toolKind: "ask_user_question" },
+            resolve,
+          }
+        } else if (toolKind === "exit_plan_mode") {
+          active.pendingInteraction = {
+            kind: "exit_plan_mode",
+            toolUseId: request.tool.toolId,
+            tool: request.tool as typeof request.tool & { toolKind: "exit_plan_mode" },
+            resolve,
+          }
+        } else {
+          throw new Error(`Unsupported pending tool kind: ${toolKind}`)
+        }
+      })
+    }
+
+    const onApprovalRequest = async (request: AgentApprovalRequest): Promise<AgentApprovalResponse> => {
+      const active = this.activeTurns.get(args.chatId)
+      if (!active) {
+        throw new Error("Chat turn ended unexpectedly")
+      }
+
+      active.status = "waiting_for_user"
+      this.emitStateChange(args.chatId)
+
+      return await new Promise<AgentApprovalResponse>((resolve) => {
+        active.pendingInteraction = {
+          kind: "approval",
+          toolUseId: request.id,
+          request,
           resolve,
         }
       })
@@ -1434,6 +1529,30 @@ export class AgentCoordinator {
         forkSession: Boolean(chat.pendingForkSessionToken),
         connection,
       })
+    } else if (args.provider === "kimi") {
+      void this.kimiManager.refreshModelCatalog()
+      const started = await this.kimiManager.startSession({
+        chatId: args.chatId,
+        cwd: project.localPath,
+        model: args.model,
+        effort: args.effort,
+        planMode: args.planMode,
+        sessionToken: chat.sessionToken,
+        pendingForkSessionToken: chat.pendingForkSessionToken,
+      })
+      if (chat.pendingForkSessionToken && started.sessionToken !== chat.pendingForkSessionToken) {
+        await this.store.setPendingForkSessionToken(args.chatId, null)
+      }
+      turn = await this.kimiManager.startTurn({
+        chatId: args.chatId,
+        content: buildPromptText(wireContent, args.attachments),
+        attachments: args.attachments,
+        model: args.model,
+        effort: args.effort,
+        planMode: args.planMode,
+        onToolRequest,
+        onApprovalRequest,
+      })
     } else {
       const started = await this.codexManager.startSession({
         chatId: args.chatId,
@@ -1470,7 +1589,7 @@ export class AgentCoordinator {
       planMode: args.planMode,
       autoPlan: args.autoPlan,
       status: args.provider === "claude" ? "running" : "starting",
-      pendingTool: null,
+      pendingInteraction: null,
       postToolFollowUp: null,
       hasFinalResult: false,
       cancelRequested: false,
@@ -1700,6 +1819,37 @@ export class AgentCoordinator {
       queuedMessagePreview: queuedMessage.content.slice(0, 160),
     })
 
+    // Native Kimi steer: if a Kimi turn is active, ask the running turn to
+    // steer instead of cancelling and replaying from scratch. Falls back to the
+    // generic cancel-and-restart path if steer is unavailable or fails.
+    const active = this.activeTurns.get(command.chatId)
+    if (active?.provider === "kimi" && active.turn.steer) {
+      try {
+        const result = await active.turn.steer({
+          content: queuedMessage.content,
+          attachments: queuedMessage.attachments,
+          model: queuedMessage.model,
+          effort: queuedMessage.modelOptions?.kimi?.reasoningEffort,
+          planMode: queuedMessage.planMode,
+        })
+        logClaudeSteer("kimi_steer_result", {
+          chatId: command.chatId,
+          queuedMessageId: command.queuedMessageId,
+          result,
+        })
+        if (result === "steered") {
+          await this.store.removeQueuedMessage(command.chatId, command.queuedMessageId)
+          return
+        }
+      } catch (error) {
+        logClaudeSteer("kimi_steer_failed", {
+          chatId: command.chatId,
+          queuedMessageId: command.queuedMessageId,
+          error: error instanceof Error ? error.message : String(error),
+        })
+      }
+    }
+
     if (this.activeTurns.has(command.chatId)) {
       await this.cancel(command.chatId, { hideInterrupted: true })
     }
@@ -1786,10 +1936,15 @@ export class AgentCoordinator {
         const skills = await this.piManager.listSkills({ chatId: command.chatId, cwd })
         return { provider: "pi", skills, origin: "live" }
       }
-      case "kimi":
-        // Kimi skill enumeration is wired in Task 11; until then the composer
-        // sees no Kimi skills rather than crashing on an unhandled provider.
+      case "kimi": {
+        const live = command.chatId
+          ? await this.kimiManager.listSkills({ chatId: command.chatId, cwd })
+          : null
+        if (live) {
+          return { provider: "kimi", skills: live, origin: "live" }
+        }
         return { provider: "kimi", skills: [], origin: "filesystem" }
+      }
     }
   }
 
@@ -1869,7 +2024,7 @@ export class AgentCoordinator {
       planMode: session.planMode,
       autoPlan: session.autoPlan,
       status: "running",
-      pendingTool: null,
+      pendingInteraction: null,
       postToolFollowUp: null,
       hasFinalResult: false,
       cancelRequested: false,
@@ -2225,21 +2380,34 @@ export class AgentCoordinator {
       }
     }
 
-    const pendingTool = active.pendingTool
-    active.pendingTool = null
+    const pendingInteraction = active.pendingInteraction
+    active.pendingInteraction = null
 
-    if (pendingTool) {
-      const result = discardedToolResult(pendingTool.tool)
-      await this.store.appendMessage(
-        chatId,
-        timestamped({
-          kind: "tool_result",
-          toolId: pendingTool.toolUseId,
-          content: result,
-        })
-      )
-      if (active.provider === "codex" && pendingTool.tool.toolKind === "exit_plan_mode") {
-        pendingTool.resolve(result)
+    if (pendingInteraction) {
+      if (pendingInteraction.kind === "approval") {
+        const result: AgentApprovalResponse = { decision: "cancelled" }
+        await this.store.appendMessage(
+          chatId,
+          timestamped({
+            kind: "tool_result",
+            toolId: pendingInteraction.toolUseId,
+            content: { ...result, discarded: true },
+          })
+        )
+        pendingInteraction.resolve(result)
+      } else {
+        const result = discardedToolResult(pendingInteraction.tool)
+        await this.store.appendMessage(
+          chatId,
+          timestamped({
+            kind: "tool_result",
+            toolId: pendingInteraction.toolUseId,
+            content: result,
+          })
+        )
+        if (active.provider === "codex" && pendingInteraction.kind === "exit_plan_mode") {
+          pendingInteraction.resolve(result)
+        }
       }
     }
 
@@ -2273,13 +2441,40 @@ export class AgentCoordinator {
     active.turn.close()
   }
 
+  private async handlePlanModeExitResult(
+    chatId: string,
+    active: ActiveTurn,
+    result: { confirmed?: boolean; clearContext?: boolean; message?: string }
+  ) {
+    if (result.confirmed && result.clearContext) {
+      await this.store.setSessionToken(chatId, null)
+      await this.store.appendMessage(chatId, timestamped({ kind: "context_cleared" }))
+    }
+
+    if (active.provider === "codex") {
+      active.postToolFollowUp = result.confirmed
+        ? {
+            content: result.message
+              ? `Proceed with the approved plan. Additional guidance: ${result.message}`
+              : "Proceed with the approved plan.",
+            planMode: false,
+          }
+        : {
+            content: result.message
+              ? `Revise the plan using this feedback: ${result.message}`
+              : "Revise the plan using this feedback.",
+            planMode: true,
+          }
+    }
+  }
+
   async respondTool(command: Extract<ClientCommand, { type: "chat.respondTool" }>) {
     const active = this.activeTurns.get(command.chatId)
-    if (!active || !active.pendingTool) {
+    if (!active || !active.pendingInteraction) {
       throw new Error("No pending tool request")
     }
 
-    const pending = active.pendingTool
+    const pending = active.pendingInteraction
     if (pending.toolUseId !== command.toolUseId) {
       throw new Error("Tool response does not match active request")
     }
@@ -2293,35 +2488,30 @@ export class AgentCoordinator {
       })
     )
 
-    active.pendingTool = null
+    active.pendingInteraction = null
     active.status = "running"
 
-    if (pending.tool.toolKind === "exit_plan_mode") {
+    if (pending.kind === "approval") {
+      const result = (command.result ?? {}) as AgentApprovalResponse
+      if (pending.request.planExit) {
+        await this.handlePlanModeExitResult(command.chatId, active, {
+          confirmed: result.decision === "approved",
+          clearContext: result.decision === "approved",
+          message: result.feedback,
+        })
+      }
+      pending.resolve(result)
+      this.emitStateChange(command.chatId)
+      return
+    }
+
+    if (pending.kind === "exit_plan_mode") {
       const result = (command.result ?? {}) as {
         confirmed?: boolean
         clearContext?: boolean
         message?: string
       }
-      if (result.confirmed && result.clearContext) {
-        await this.store.setSessionToken(command.chatId, null)
-        await this.store.appendMessage(command.chatId, timestamped({ kind: "context_cleared" }))
-      }
-
-      if (active.provider === "codex") {
-        active.postToolFollowUp = result.confirmed
-          ? {
-              content: result.message
-                ? `Proceed with the approved plan. Additional guidance: ${result.message}`
-                : "Proceed with the approved plan.",
-              planMode: false,
-            }
-          : {
-              content: result.message
-                ? `Revise the plan using this feedback: ${result.message}`
-                : "Revise the plan using this feedback.",
-              planMode: true,
-            }
-      }
+      await this.handlePlanModeExitResult(command.chatId, active, result)
     }
 
     pending.resolve(command.result)

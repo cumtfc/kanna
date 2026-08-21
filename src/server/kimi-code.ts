@@ -13,7 +13,7 @@ import type {
   TranscriptEntry,
 } from "../shared/types"
 import { normalizeToolCall } from "../shared/tools"
-import type { HarnessEvent, HarnessToolRequest, HarnessTurn } from "./harness-types"
+import type { HarnessApprovalRequest, HarnessApprovalResponse, HarnessEvent, HarnessToolRequest, HarnessTurn } from "./harness-types"
 import { AsyncQueue } from "./async-queue"
 import { timestamped } from "./transcript"
 import {
@@ -38,29 +38,6 @@ import {
   type KimiWsEvent,
 } from "./kimi-code-events"
 import { applyKimiModels } from "./provider-catalog"
-
-export interface HarnessApprovalRequest {
-  id: string
-  toolId: string
-  toolName: string
-  action: string
-  input: unknown
-  options: Array<{
-    id: "approve" | "approve_session" | "reject" | "cancel"
-    label: string
-  }>
-  planExit?: {
-    plan?: string
-    options?: Array<{ label: string; description?: string }>
-  }
-}
-
-export interface HarnessApprovalResponse {
-  decision: "approved" | "rejected" | "cancelled"
-  scope?: "session"
-  feedback?: string
-  selected_label?: string
-}
 
 export interface StartKimiSessionArgs {
   chatId: string
@@ -186,9 +163,23 @@ export function kimiTurnResult(reason?: string, isError = false): TranscriptEntr
 }
 
 function toKimiContentParts(content: string, _attachments: ChatAttachment[]): KimiPromptSubmission["content"] {
-  // Task 11 will add native attachment parts. For now, attachments are surfaced
-  // through the existing <kanna-attachments> prompt hint built by AgentCoordinator.
+  // Native media/file content parts require inspecting the live Kimi OpenAPI for
+  // the installed version; keep the existing <kanna-attachments> prompt hint
+  // as the supported path until that surface is validated.
   return [{ type: "text", text: content }]
+}
+
+function normalizeKimiSkillSource(source: string | undefined): HarnessSkill["source"] {
+  switch (source) {
+    case "builtin":
+    case "command":
+    case "skill":
+    case "plugin":
+    case "extension":
+      return source
+    default:
+      return "skill"
+  }
 }
 
 function normalizeKimiQuestionRequest(request: KimiQuestionRequest): HarnessToolRequest {
@@ -263,7 +254,7 @@ function mapKimiApprovalResponse(kanna: HarnessApprovalResponse): KimiApprovalRe
       return {
         decision: "approved",
         ...(kanna.scope === "session" ? { scope: "session" as const } : {}),
-        ...(typeof kanna.selected_label === "string" ? { selected_label: kanna.selected_label } : {}),
+        ...(typeof kanna.selectedLabel === "string" ? { selected_label: kanna.selectedLabel } : {}),
         ...(typeof kanna.feedback === "string" ? { feedback: kanna.feedback } : {}),
       }
     case "rejected":
@@ -500,9 +491,42 @@ export class KimiCodeManager {
     }
   }
 
-  async listSkills(_args: { chatId?: string; cwd: string }): Promise<HarnessSkill[] | null> {
-    // Task 11 will wire live Kimi skill enumeration. Until then the composer sees
-    // no Kimi skills rather than crashing on an unhandled provider.
+  async probeAuth(): Promise<{ signedIn: boolean; account?: string; statusDetail?: string } | null> {
+    try {
+      await this.ensureReady()
+      const auth = await this.api!.getAuth()
+      return {
+        signedIn: auth.signed_in,
+        account: auth.account?.email,
+        statusDetail: auth.signed_in ? undefined : "Sign in to Kimi Code to use this provider.",
+      }
+    } catch {
+      return null
+    }
+  }
+
+  async listSkills(args: { chatId?: string; cwd: string }): Promise<HarnessSkill[] | null> {
+    // Prefer the live Kimi session's skill catalog when we have one.
+    if (args.chatId) {
+      const context = this.chats.get(args.chatId)
+      if (context && !context.closed) {
+        try {
+          const items = await this.api!.listSessionSkills(context.sessionId)
+          const skills: HarnessSkill[] = items
+            .filter((item) => item.name)
+            .map((item) => ({
+              name: item.name,
+              description: item.description ?? "",
+              ...(item.argument_hint ? { argumentHint: item.argument_hint } : {}),
+              source: normalizeKimiSkillSource(item.source),
+              ...(item.path ? { path: item.path } : {}),
+            }))
+          return skills
+        } catch {
+          // Fall through to filesystem fallback.
+        }
+      }
+    }
     return null
   }
 
@@ -690,10 +714,10 @@ export class KimiCodeManager {
           kind: "tool_call",
           tool: {
             kind: "tool",
-            toolKind: "unknown_tool",
-            toolName: normalized.toolName,
+            toolKind: "approval",
+            toolName: "Approval",
             toolId: requestId,
-            input: { payload: normalized.input },
+            input: normalized,
             rawInput: request as unknown as Record<string, unknown>,
           },
         }),
@@ -769,6 +793,17 @@ export class KimiCodeManager {
       const status = asString(data.status) ?? asString(data.message) ?? ""
       if (status) {
         pendingTurn.queue.push({ type: "transcript", entry: timestamped({ kind: "status", status }) })
+      }
+      const usedTokens = typeof data.context_tokens === "number" ? data.context_tokens : undefined
+      const maxTokens = typeof data.max_context_tokens === "number" ? data.max_context_tokens : undefined
+      if (usedTokens !== undefined || maxTokens !== undefined) {
+        pendingTurn.queue.push({
+          type: "transcript",
+          entry: timestamped({
+            kind: "context_window_updated",
+            usage: { usedTokens, maxTokens },
+          }),
+        })
       }
       return
     }

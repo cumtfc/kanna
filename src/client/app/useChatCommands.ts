@@ -1,6 +1,6 @@
 import { useCallback } from "react"
 import type { EditorOpenSettings, OpenExternalAction } from "../../shared/protocol"
-import type { AskUserQuestionAnswerMap, SidebarChatRow } from "../../shared/types"
+import type { AgentApprovalResponse, AskUserQuestionAnswerMap, SidebarChatRow } from "../../shared/types"
 import type { AskUserQuestionItem } from "../components/messages/types"
 import type { OpenLocalLinkTarget } from "../components/messages/shared"
 import type { useAppDialog } from "../components/ui/app-dialog"
@@ -115,6 +115,16 @@ export function useChatCommands(params: {
     }, { keepCommandError: true })
   }, [activeChatId, wrapCommand])
 
+  const handleApprovalResponse = useCallback(async (toolUseId: string, response: AgentApprovalResponse) => {
+    if (!activeChatId) return
+    await wrapCommand({
+      type: "chat.respondTool",
+      chatId: activeChatId,
+      toolUseId,
+      result: response,
+    }, { keepCommandError: true })
+  }, [activeChatId, wrapCommand])
+
   const handleCopyPath = useCallback(async (localPath: string) => {
     try {
       if (typeof navigator === "undefined" || !navigator.clipboard?.writeText) {
@@ -199,6 +209,7 @@ export function useChatCommands(params: {
     handleRenameProject,
     handleAskUserQuestion,
     handleExitPlanMode,
+    handleApprovalResponse,
     handleCopyPath,
     handleOpenExternal,
     handleOpenLocalLink,

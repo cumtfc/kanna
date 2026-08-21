@@ -7,8 +7,8 @@ import {
   kimiSystemInitEntry,
   kimiTurnResult,
   normalizeKimiToolCall,
-  type HarnessApprovalResponse,
 } from "./kimi-code"
+import type { HarnessApprovalResponse } from "./harness-types"
 
 class FakeKimiCodeServerProcess extends KimiCodeServerProcess {
   constructor(private readonly connection: KimiServerConnection = { baseUrl: "http://127.0.0.1:8080", token: "test-token", owned: true }) {
@@ -86,6 +86,17 @@ class FakeKimiCodeApi extends KimiCodeApi {
 
   override async getAuth(): Promise<import("./kimi-code-api").KimiAuthSnapshot> {
     return { signed_in: false }
+  }
+
+  override async listSessionSkills(sessionId: string): Promise<import("./kimi-code-api").KimiSkillItem[]> {
+    this.calls.push({ method: "listSessionSkills", args: [sessionId] })
+    return this.skills
+  }
+
+  private skills: import("./kimi-code-api").KimiSkillItem[] = []
+
+  seedSkills(skills: import("./kimi-code-api").KimiSkillItem[]) {
+    this.skills = skills
   }
 
   seedSession(sessionId: string, body?: { metadata?: Record<string, unknown> }) {
@@ -253,6 +264,36 @@ describe("KimiCodeManager", () => {
     expect(api.calls.some((call) => call.method === "abortSession")).toBe(false)
     expect(api.calls.some((call) => call.method.startsWith("delete"))).toBe(false)
     expect(sessionToken).toMatch(/^session_/)
+  })
+
+  test("listSkills returns live session skills when a chat is active", async () => {
+    const { manager, api } = managerWithFakes()
+    const { sessionToken } = await manager.startSession({
+      chatId: "chat-1",
+      cwd: "/tmp/project",
+      model: "kimi-code/k3",
+      planMode: false,
+    })
+
+    api.seedSkills([
+      { name: "test:hello", description: "Say hello", source: "builtin" },
+      { name: "custom/tool", description: "A custom tool", argument_hint: "<name>", path: "/tmp/skills/tool.md" },
+    ])
+
+    const skills = await manager.listSkills({ chatId: "chat-1", cwd: "/tmp/project" })
+
+    expect(api.calls.some((call) => call.method === "listSessionSkills" && call.args[0] === sessionToken)).toBe(true)
+    expect(skills).toEqual([
+      { name: "test:hello", description: "Say hello", source: "builtin" },
+      { name: "custom/tool", description: "A custom tool", argumentHint: "<name>", source: "skill", path: "/tmp/skills/tool.md" },
+    ])
+  })
+
+  test("listSkills falls back to null when no chat is active", async () => {
+    const { manager, api } = managerWithFakes()
+    const skills = await manager.listSkills({ chatId: "chat-1", cwd: "/tmp/project" })
+    expect(skills).toBeNull()
+    expect(api.calls.some((call) => call.method === "listSessionSkills")).toBe(false)
   })
 
   test("startTurn submits the prompt with exact options", async () => {
