@@ -24,6 +24,14 @@ export interface KimiAuthSnapshot {
   }
 }
 
+export interface KimiOAuthLoginState {
+  status: "pending" | "ready" | "completed" | "expired" | "cancelled"
+  verification_url?: string
+  user_code?: string
+  expires_at?: string
+  message?: string
+}
+
 export interface KimiSession {
   id: string
   created_at?: string
@@ -47,6 +55,14 @@ export interface KimiModelItem {
   capabilities?: string[]
   support_efforts?: string[]
   default_effort?: string
+}
+
+export interface KimiSkillItem {
+  name: string
+  description?: string
+  argument_hint?: string
+  path?: string
+  source?: string
 }
 
 export interface KimiPromptItem {
@@ -214,8 +230,28 @@ export class KimiCodeApi {
     return await this.request<KimiAuthSnapshot>("GET", "/api/v1/auth")
   }
 
+  async startOAuthLogin(): Promise<KimiOAuthLoginState> {
+    return await this.request<KimiOAuthLoginState>("POST", "/api/v1/oauth/login")
+  }
+
+  async getOAuthLoginState(): Promise<KimiOAuthLoginState> {
+    return await this.request<KimiOAuthLoginState>("GET", "/api/v1/oauth/login")
+  }
+
+  async cancelOAuthLogin(): Promise<void> {
+    await this.request<void>("DELETE", "/api/v1/oauth/login")
+  }
+
+  async logout(): Promise<void> {
+    await this.request<void>("POST", "/api/v1/oauth/logout")
+  }
+
   async listModels(): Promise<KimiModelItem[]> {
     return await this.request<KimiModelItem[]>("GET", "/api/v1/models")
+  }
+
+  async listSessionSkills(sessionId: string): Promise<KimiSkillItem[]> {
+    return await this.request<KimiSkillItem[]>("GET", `/api/v1/sessions/${encodeURIComponent(sessionId)}/skills`)
   }
 
   async createSession(body?: { metadata?: Record<string, unknown>; model?: string; thinking?: string; permission_mode?: string; plan_mode?: boolean }): Promise<KimiSession> {
