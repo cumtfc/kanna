@@ -569,8 +569,11 @@ export class ProviderAuthManager {
       // Prefer bash: on Debian/Ubuntu `sh` is dash, which chokes on bash-isms
       // in the user's profile files ("source: not found") and buries the real
       // installer error in noise.
+      // Use `-c` (not `-lc`) so the child inherits the kanna process env —
+      // login shells reset PATH and hide tools like bun that live outside
+      // the default system paths.
       const shell = this.resolvePath("bash") ? "bash" : "sh"
-      const result = await this.deps.exec([shell, "-lc", command], { timeoutMs: 10 * 60_000 })
+      const result = await this.deps.exec([shell, "-c", command], { timeoutMs: 10 * 60_000 })
       if (result.code !== 0) {
         throw new Error(truncateOutput(result.stderr || result.stdout) || `Installer exited with code ${result.code}`)
       }

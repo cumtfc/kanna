@@ -50,7 +50,7 @@ export function hasCommand(command: string) {
  * its PATH line to the interactive shell rc (~/.zshrc on macOS), which
  * `sh -lc` never reads. Checked as a fallback when the login shell misses.
  */
-const USER_BIN_DIRS = [".local/bin", ".bun/bin", ".npm-global/bin"]
+const USER_BIN_DIRS = [".local/bin", ".bun/bin", ".npm-global/bin", ".kimi-code/bin"]
 
 function findInUserBinDirs(command: string, homeDir: string): string | null {
   for (const dir of USER_BIN_DIRS) {
