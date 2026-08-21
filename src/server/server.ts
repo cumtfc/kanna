@@ -49,12 +49,62 @@ const STALE_EMPTY_CHAT_PRUNE_INTERVAL_MS = 60 * 1000
 const STALE_CHAT_AUTO_ARCHIVE_INTERVAL_MS = 6 * 60 * 60 * 1000
 const STALE_CHAT_DELETE_INTERVAL_MS = 24 * 60 * 60 * 1000
 
-async function withOriginAgentCluster(response: Response | Promise<Response> | undefined) {
+async function withOriginAgentCluster(response: Response | Promise<Response> | undefined, corsOrigin?: string | null) {
   const resolved = await response
   // Chrome groups localhost ports into one site. Origin-keying reduces the
   // chance that a busy preview shares Kanna's renderer.
   resolved?.headers.set("Origin-Agent-Cluster", "?1")
+  if (resolved && corsOrigin) {
+    applyCorsHeaders(resolved, corsOrigin)
+  }
   return resolved
+}
+
+function corsOriginKey(origin: string): { hostname: string; port: string } | null {
+  try {
+    const url = new URL(origin)
+    return { hostname: url.hostname, port: url.port || corsDefaultPort(url.protocol) }
+  } catch {
+    return null
+  }
+}
+
+function corsDefaultPort(protocol: string): string {
+  return protocol === "https:" ? "443" : protocol === "http:" ? "80" : ""
+}
+
+function corsMatch(a: string, b: string): boolean {
+  const keyA = corsOriginKey(a)
+  const keyB = corsOriginKey(b)
+  if (!keyA || !keyB) return false
+  return keyA.hostname === keyB.hostname && keyA.port === keyB.port
+}
+
+function isAllowedCorsOrigin(origin: string | null, allowedOrigins: string[]): boolean {
+  if (!origin) return false
+  if (allowedOrigins.length === 0) return false
+  return allowedOrigins.some((allowed) => corsMatch(origin, allowed))
+}
+
+function applyCorsHeaders(response: Response, origin: string | null): Response {
+  if (origin) {
+    response.headers.set("Access-Control-Allow-Origin", origin)
+    response.headers.set("Vary", "Origin")
+  }
+  return response
+}
+
+function corsPreflightResponse(origin: string | null): Response {
+  return new Response(null, {
+    status: 204,
+    headers: {
+      ...(origin ? { "Access-Control-Allow-Origin": origin } : {}),
+      "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With",
+      "Access-Control-Allow-Credentials": "true",
+      "Vary": "Origin",
+    },
+  })
 }
 
 export async function persistUploadedFiles(args: {
@@ -125,6 +175,12 @@ export interface StartKannaServerOptions {
    * through the app-settings snapshot to unlock dev-box-only UI.
    */
   directCloud?: boolean
+  /**
+   * Explicit list of allowed cross-origin origins. When provided, CORS headers
+   * are emitted for matching origins and the password-auth origin check accepts
+   * them. Scheme differences (http vs https) are ignored.
+   */
+  allowedOrigins?: string[]
   onMigrationProgress?: (message: string) => void
   update?: {
     version: string
@@ -139,7 +195,12 @@ export async function startKannaServer(options: StartKannaServerOptions = {}) {
   const hostname = options.host ?? "127.0.0.1"
   const strictPort = options.strictPort ?? false
   const runtimeProfile = getRuntimeProfile()
-  const auth = options.password ? createAuthManager(options.password, { trustProxy: options.trustProxy ?? false }) : null
+  const auth = options.password
+    ? createAuthManager(options.password, {
+        trustProxy: options.trustProxy ?? false,
+        allowedOrigins: options.allowedOrigins,
+      })
+    : null
   const store = new EventStore(options.dataDir)
   const diffStore = new DiffStore(store.dataDir)
   const machineDisplayName = getMachineDisplayName()
@@ -408,6 +469,17 @@ export async function startKannaServer(options: StartKannaServerOptions = {}) {
         hostname,
         async fetch(req, serverInstance) {
           const url = new URL(req.url)
+          const requestOrigin = req.headers.get("origin")
+          const allowedOrigins = options.allowedOrigins ?? []
+          const corsOrigin = isAllowedCorsOrigin(requestOrigin, allowedOrigins) ? requestOrigin : null
+
+          if (req.method === "OPTIONS" && corsOrigin) {
+            return corsPreflightResponse(corsOrigin)
+          }
+
+          const wrap = (response: Response | Promise<Response> | undefined) =>
+            withOriginAgentCluster(response, corsOrigin)
+
           const requestClass: CloudRequestClass = cloud
             ? classifyCloudRequest(req, cloud.identity.proxySecret)
             : "local"
@@ -417,7 +489,7 @@ export async function startKannaServer(options: StartKannaServerOptions = {}) {
           // feature-detect cloud mode (the SPA fallback would otherwise
           // return index.html with a 200).
           if (url.pathname === CLOUD_BROWSER_PATH_PREFIX || url.pathname.startsWith(`${CLOUD_BROWSER_PATH_PREFIX}/`)) {
-            return withOriginAgentCluster(Response.json({ error: "Not found" }, { status: 404 }))
+            return wrap(Response.json({ error: "Not found" }, { status: 404 }))
           }
 
           const upgradeWebSocket = () => {
@@ -443,29 +515,29 @@ export async function startKannaServer(options: StartKannaServerOptions = {}) {
           // surface.
           if (requestClass === "untrusted") {
             if (url.pathname === "/health") {
-              return withOriginAgentCluster(Response.json({ ok: true, port: actualPort }))
+              return wrap(Response.json({ ok: true, port: actualPort }))
             }
             if (url.pathname === "/ws") {
               if (allowCloudWsUpgrade()) {
-                return withOriginAgentCluster(upgradeWebSocket())
+                return wrap(upgradeWebSocket())
               }
-              return withOriginAgentCluster(new Response("Unauthorized", { status: 401 }))
+              return wrap(new Response("Unauthorized", { status: 401 }))
             }
-            return withOriginAgentCluster(new Response("Not found", { status: 404 }))
+            return wrap(new Response("Not found", { status: 404 }))
           }
 
           if (url.pathname === "/auth/status") {
-            return withOriginAgentCluster(auth
+            return wrap(auth
               ? auth.handleStatus(req)
               : Response.json({ enabled: false, authenticated: true }))
           }
 
           if (url.pathname === "/auth/logout") {
             if (req.method !== "POST") {
-              return withOriginAgentCluster(new Response(null, { status: 405, headers: { Allow: "POST" } }))
+              return wrap(new Response(null, { status: 405, headers: { Allow: "POST" } }))
             }
 
-            return withOriginAgentCluster(auth
+            return wrap(auth
               ? auth.handleLogout(req)
               : Response.json({ ok: true }))
           }
@@ -475,12 +547,12 @@ export async function startKannaServer(options: StartKannaServerOptions = {}) {
           if (auth && requestClass !== "proxied") {
             if (url.pathname === "/auth/login") {
               if (req.method === "GET") {
-                return withOriginAgentCluster(auth.redirectToApp(req))
+                return wrap(auth.redirectToApp(req))
               }
               if (req.method === "POST") {
-                return withOriginAgentCluster(auth.handleLogin(req, "/"))
+                return wrap(auth.handleLogin(req, "/"))
               }
-              return withOriginAgentCluster(new Response(null, { status: 405, headers: { Allow: "GET, POST" } }))
+              return wrap(new Response(null, { status: 405, headers: { Allow: "GET, POST" } }))
             }
 
             if (url.pathname === "/ws") {
@@ -488,19 +560,19 @@ export async function startKannaServer(options: StartKannaServerOptions = {}) {
               // (minted through the proxied /api/cloud/ws-endpoint call).
               if (!allowCloudWsUpgrade()) {
                 if (!auth.validateOrigin(req)) {
-                  return withOriginAgentCluster(new Response("Forbidden", { status: 403 }))
+                  return wrap(new Response("Forbidden", { status: 403 }))
                 }
                 if (!auth.isAuthenticated(req)) {
-                  return withOriginAgentCluster(new Response("Unauthorized", { status: 401 }))
+                  return wrap(new Response("Unauthorized", { status: 401 }))
                 }
               }
             } else if (url.pathname.startsWith("/api/") && !auth.isAuthenticated(req)) {
-              return withOriginAgentCluster(Response.json({ error: "Unauthorized" }, { status: 401 }))
+              return wrap(Response.json({ error: "Unauthorized" }, { status: 401 }))
             }
           }
 
           if (url.pathname === "/ws") {
-            return withOriginAgentCluster(upgradeWebSocket())
+            return wrap(upgradeWebSocket())
           }
 
           if (url.pathname === "/health") {
@@ -508,36 +580,36 @@ export async function startKannaServer(options: StartKannaServerOptions = {}) {
             // data dir is already being served (single-instance guard). Only
             // exposed on local/proxied requests — the raw-tunnel /health
             // above stays minimal.
-            return withOriginAgentCluster(Response.json({ ok: true, port: actualPort, instance: instanceFingerprint(store.dataDir) }))
+            return wrap(Response.json({ ok: true, port: actualPort, instance: instanceFingerprint(store.dataDir) }))
           }
 
           if (url.pathname === CLOUD_PAIR_SESSION_PATH) {
             // Local requests only: claiming a machine is something you do at
             // the keyboard, never through the proxy or the raw tunnel.
             if (requestClass !== "local") {
-              return withOriginAgentCluster(Response.json({ error: "Not found" }, { status: 404 }))
+              return wrap(Response.json({ error: "Not found" }, { status: 404 }))
             }
             const respond = (snapshot: PairSessionSnapshot | { status: "unsupported" }) =>
               Response.json(snapshot, { headers: { "Cache-Control": "no-store" } })
 
             if (cloud) {
-              return withOriginAgentCluster(respond({ status: "paired", appOrigin: cloud.identity.appOrigin }))
+              return wrap(respond({ status: "paired", appOrigin: cloud.identity.appOrigin }))
             }
             if (!pairSession) {
-              return withOriginAgentCluster(respond({ status: "unsupported" }))
+              return wrap(respond({ status: "unsupported" }))
             }
             if (req.method === "POST") {
-              return withOriginAgentCluster(respond(await pairSession.start()))
+              return wrap(respond(await pairSession.start()))
             }
             if (req.method === "GET") {
-              return withOriginAgentCluster(respond(pairSession.status()))
+              return wrap(respond(pairSession.status()))
             }
-            return withOriginAgentCluster(new Response(null, { status: 405, headers: { Allow: "GET, POST" } }))
+            return wrap(new Response(null, { status: 405, headers: { Allow: "GET, POST" } }))
           }
 
           if (url.pathname === CLOUD_WS_ENDPOINT_PATH) {
             if (req.method !== "GET") {
-              return withOriginAgentCluster(new Response(null, { status: 405, headers: { Allow: "GET" } }))
+              return wrap(new Response(null, { status: 405, headers: { Allow: "GET" } }))
             }
             // Proxied requests get the machine's permanent tunnel WS URL + a
             // short-lived token so the browser's WebSocket bypasses the proxy
@@ -550,33 +622,33 @@ export async function startKannaServer(options: StartKannaServerOptions = {}) {
                 connectToken: minted.token,
                 expiresInMs: minted.expiresInMs,
               }
-              return withOriginAgentCluster(Response.json(payload, { headers: { "Cache-Control": "no-store" } }))
+              return wrap(Response.json(payload, { headers: { "Cache-Control": "no-store" } }))
             }
             const payload: CloudWsEndpointResponse = { wsUrl: null }
-            return withOriginAgentCluster(Response.json(payload, { headers: { "Cache-Control": "no-store" } }))
+            return wrap(Response.json(payload, { headers: { "Cache-Control": "no-store" } }))
           }
 
           const uploadResponse = await handleProjectUpload(req, url, store)
           if (uploadResponse) {
-            return withOriginAgentCluster(uploadResponse)
+            return wrap(uploadResponse)
           }
 
           const deleteUploadResponse = await handleProjectUploadDelete(req, url, store)
           if (deleteUploadResponse) {
-            return withOriginAgentCluster(deleteUploadResponse)
+            return wrap(deleteUploadResponse)
           }
 
           const attachmentContentResponse = await handleAttachmentContent(req, url, store)
           if (attachmentContentResponse) {
-            return withOriginAgentCluster(attachmentContentResponse)
+            return wrap(attachmentContentResponse)
           }
 
           const projectFileContentResponse = await handleProjectFileContent(req, url, store)
           if (projectFileContentResponse) {
-            return withOriginAgentCluster(projectFileContentResponse)
+            return wrap(projectFileContentResponse)
           }
 
-          return withOriginAgentCluster(serveStatic(distDir, url.pathname))
+          return wrap(serveStatic(distDir, url.pathname))
         },
         websocket: {
           open(ws) {

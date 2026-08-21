@@ -147,6 +147,7 @@ describe("parseArgs", () => {
         strictPort: false,
         noCloud: false,
         directCloud: false,
+        allowedOrigins: [],
       },
     })
   })
@@ -163,6 +164,7 @@ describe("parseArgs", () => {
         strictPort: true,
         noCloud: false,
         directCloud: false,
+        allowedOrigins: [],
       },
     })
   })
@@ -179,6 +181,7 @@ describe("parseArgs", () => {
         strictPort: false,
         noCloud: false,
         directCloud: false,
+        allowedOrigins: [],
       },
     })
   })
@@ -195,6 +198,7 @@ describe("parseArgs", () => {
         strictPort: false,
         noCloud: false,
         directCloud: false,
+        allowedOrigins: [],
       },
     })
   })
@@ -211,6 +215,7 @@ describe("parseArgs", () => {
         strictPort: false,
         noCloud: false,
         directCloud: false,
+        allowedOrigins: [],
       },
     })
   })
@@ -227,8 +232,31 @@ describe("parseArgs", () => {
         strictPort: false,
         noCloud: false,
         directCloud: false,
+        allowedOrigins: [],
       },
     })
+  })
+
+  test("--origin accumulates allowed origins", () => {
+    expect(parseArgs(["--origin", "https://example.com", "--origin", "http://localhost:3000"])).toEqual({
+      kind: "run",
+      options: {
+        port: 3210,
+        host: "127.0.0.1",
+        openBrowser: true,
+        share: false,
+        password: null,
+        strictPort: false,
+        noCloud: false,
+        directCloud: false,
+        allowedOrigins: ["https://example.com", "http://localhost:3000"],
+      },
+    })
+  })
+
+  test("--origin without a value throws", () => {
+    expect(() => parseArgs(["--origin"])).toThrow("Missing value for --origin")
+    expect(() => parseArgs(["--origin", "--no-open"])).toThrow("Missing value for --origin")
   })
 
   test("--password without a value throws", () => {
@@ -253,6 +281,7 @@ describe("parseArgs", () => {
         strictPort: false,
         noCloud: false,
         directCloud: false,
+        allowedOrigins: [],
       },
     })
   })
@@ -269,6 +298,7 @@ describe("parseArgs", () => {
         strictPort: false,
         noCloud: false,
         directCloud: false,
+        allowedOrigins: [],
       },
     })
   })
