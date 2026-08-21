@@ -309,6 +309,7 @@ describe("getLatestToolIds", () => {
 
     expect(getLatestToolIds(messages)).toEqual({
       AskUserQuestion: messages[0]?.kind === "tool" ? messages[0].id : null,
+      Approval: null,
       ExitPlanMode: null,
       TodoWrite: messages[1]?.kind === "tool" ? messages[1].id : null,
     })
@@ -354,6 +355,7 @@ describe("getLatestToolIds", () => {
 
     expect(getLatestToolIds(messages)).toEqual({
       AskUserQuestion: null,
+      Approval: null,
       ExitPlanMode: null,
       TodoWrite: null,
     })

@@ -130,5 +130,6 @@ export const AUTH_SERVICE_ICONS: Record<AuthServiceId, IconComponent> = {
   codex: OpenAIIcon,
   cursor: CursorIcon,
   gh: GitHubIcon,
+  kimi: KimiIcon,
   openrouter: OpenRouterIcon,
 }

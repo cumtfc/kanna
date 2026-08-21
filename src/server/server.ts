@@ -17,6 +17,7 @@ import { createPairSessionManager, type PairSessionSnapshot } from "./cloud/pair
 import { EventStore } from "./event-store"
 import { AgentCoordinator } from "./agent"
 import { CodexAppServerManager } from "./codex-app-server"
+import { KimiCodeManager } from "./kimi-code"
 import { KimiCodeServerProcess } from "./kimi-code-server"
 import { KannaAnalyticsReporter } from "./analytics"
 import { AppSettingsManager } from "./app-settings"
@@ -221,10 +222,12 @@ export async function startKannaServer(options: StartKannaServerOptions = {}) {
     : null
   const codexManager = new CodexAppServerManager()
   const kimiServerProcess = new KimiCodeServerProcess()
+  const kimiManager = new KimiCodeManager({ server: kimiServerProcess })
   const agent = new AgentCoordinator({
     store,
     analytics,
     codexManager,
+    kimiManager,
     onStateChange: (chatId?: string, options?: { immediate?: boolean }) => {
       if (chatId) {
         if (options?.immediate) {
@@ -251,6 +254,7 @@ export async function startKannaServer(options: StartKannaServerOptions = {}) {
     writeLlmProvider: writeLlmProviderSnapshot,
     fetchLatestNpmVersion: fetchLatestPackageVersion,
     trackEvent: analytics.track.bind(analytics),
+    probeKimiAuth: async () => await kimiManager.probeAuth(),
     onSignedIn: (service) => {
       // A fresh sign-in unlocks usage limits (claude/codex empty-state cards
       // flip from auth → usage) and the live Cursor model catalog.
@@ -262,6 +266,9 @@ export async function startKannaServer(options: StartKannaServerOptions = {}) {
         // Never let a cached "unauthenticated" repo list outlive the sign-in
         // (clone palette / home repos section fetch through this cache).
         clearGitHubRepoCache()
+      }
+      if (service === "kimi") {
+        void agent.refreshKimiModelCatalog()
       }
     },
   })
@@ -611,8 +618,9 @@ export async function startKannaServer(options: StartKannaServerOptions = {}) {
     // attached at pair time is ours to take down.
     await selfPairedCloud?.stop()
     // Stop the owned Kimi Code child process (if any) before tearing down the
-    // rest of the server. External sandbox mode is a no-op here.
-    kimiServerProcess.stop()
+    // rest of the server. This also closes Kimi chat contexts and event
+    // subscriptions. External sandbox mode is a no-op here.
+    kimiManager.stopAll()
     clearInterval(staleEmptyChatPruneInterval)
     clearInterval(staleChatAutoArchiveInterval)
     clearInterval(staleChatDeleteInterval)

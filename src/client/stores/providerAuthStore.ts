@@ -106,7 +106,7 @@ export function selectAuthService(
 export function getUnauthenticatedHarnesses(snapshot: ProviderAuthSnapshot | null): Set<AgentProvider> {
   const result = new Set<AgentProvider>()
   if (!snapshot) return result
-  for (const provider of ["claude", "codex", "cursor"] as const) {
+  for (const provider of ["claude", "codex", "cursor", "kimi"] as const) {
     const serviceId = authServiceForProvider(provider)
     if (!serviceId) continue
     const service = selectAuthService(snapshot, serviceId)
@@ -130,7 +130,7 @@ export interface SetupStatus {
   /** Every service the flow cares about has been probed (no "unknown" left). */
   resolved: boolean
   githubConnected: boolean
-  /** At least one coding-agent harness (claude/codex/cursor) is signed in. */
+  /** At least one coding-agent harness (claude/codex/cursor/kimi) is signed in. */
   anyAgentConnected: boolean
   openRouterConnected: boolean
   /** Something the wizard covers is still unconnected. */
@@ -141,13 +141,13 @@ export function getSetupStatus(snapshot: ProviderAuthSnapshot | null): SetupStat
   const services = snapshot?.services ?? []
   const byId = new Map(services.map((service) => [service.service, service]))
   const isConnected = (id: AuthServiceId) => byId.get(id)?.authStatus === "signed_in"
-  const relevant: AuthServiceId[] = ["claude", "codex", "cursor", "gh", "openrouter"]
+  const relevant: AuthServiceId[] = ["claude", "codex", "cursor", "kimi", "gh", "openrouter"]
   const resolved = services.length > 0 && relevant.every((id) => {
     const status = byId.get(id)?.authStatus
     return status !== undefined && status !== "unknown"
   })
   const githubConnected = isConnected("gh")
-  const anyAgentConnected = isConnected("claude") || isConnected("codex") || isConnected("cursor")
+  const anyAgentConnected = isConnected("claude") || isConnected("codex") || isConnected("cursor") || isConnected("kimi")
   const openRouterConnected = isConnected("openrouter")
   return {
     resolved,
